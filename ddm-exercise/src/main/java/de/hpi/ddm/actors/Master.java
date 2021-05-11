@@ -115,6 +115,7 @@ public class Master extends AbstractLoggingActor {
 		// - It is your choice, how and if you want to make use of the batched inputs. Simply aggregate all batches in the Master and start the processing afterwards, if you wish.
 
 		// TODO: Stop fetching lines from the Reader once an empty BatchMessage was received; we have seen all data then
+		// this feels like a central task and I do not see a better way to do it than it is already done.
 		if (message.getLines().isEmpty()) {
 			this.terminate();
 			return;
