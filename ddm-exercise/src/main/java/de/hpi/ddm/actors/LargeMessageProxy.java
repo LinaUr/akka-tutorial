@@ -105,8 +105,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		System.out.println("Stream ready");
 
 		// tell receiver to stream source
-		// why can this not be inferred??
-		receiverProxy.tell(new BytesMessage(sourceRef, sender, receiver), this.self());
+		receiverProxy.tell(new BytesMessage<>(sourceRef, sender, receiver), this.self());
 	}
 
 	private void handle(BytesMessage message) {
@@ -144,7 +143,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		Object message = kryo.fromBytes(bytes);
 		System.out.println("here is your message:");
 		System.out.println(message);
-
 
 		// finally tell receiver about message
 		receiver.tell(message, sender);
