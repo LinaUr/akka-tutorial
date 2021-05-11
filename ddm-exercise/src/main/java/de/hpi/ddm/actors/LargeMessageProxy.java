@@ -1,11 +1,21 @@
 package de.hpi.ddm.actors;
 
 import java.io.Serializable;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletionStage;
 
+import akka.NotUsed;
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
 import akka.actor.Props;
+import akka.stream.SourceRef;
+import akka.stream.javadsl.Sink;
+import akka.stream.javadsl.Source;
+import akka.stream.javadsl.StreamRefs;
+import com.twitter.chill.KryoPool;
+import de.hpi.ddm.singletons.KryoPoolSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -36,7 +46,8 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	@Data @NoArgsConstructor @AllArgsConstructor
 	public static class BytesMessage<T> implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
-		private T bytes;
+		// to tell receiver where to look for stream
+		private SourceRef<Byte> sourceRef;
 		private ActorRef sender;
 		private ActorRef receiver;
 	}
@@ -63,29 +74,79 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	}
 
 	private void handle(LargeMessage<?> largeMessage) {
+		// boilerplate by Thorsten that looks good
 		Object message = largeMessage.getMessage();
 		ActorRef sender = this.sender();
 		ActorRef receiver = largeMessage.getReceiver();
 		ActorSelection receiverProxy = this.context().actorSelection(receiver.path().child(DEFAULT_NAME));
-		
-		// TODO: Implement a protocol that transmits the potentially very large message object.
-		// The following code sends the entire message wrapped in a BytesMessage, which will definitely fail in a distributed setting if the message is large!
-		// Solution options:
-		// a) Split the message into smaller batches of fixed size and send the batches via ...
-		//    a.a) self-build send-and-ack protocol (see Master/Worker pull propagation), or
-		//    a.b) Akka streaming using the streams build-in backpressure mechanisms.
-		// b) Send the entire message via Akka's http client-server component.
-		// c) Other ideas ...
-		// Hints for splitting:
-		// - To split an object, serialize it into a byte array and then send the byte array range-by-range (tip: try "KryoPoolSingleton.get()").
-		// - If you serialize a message manually and send it, it will, of course, be serialized again by Akka's message passing subsystem.
-		// - But: Good, language-dependent serializers (such as kryo) are aware of byte arrays so that their serialization is very effective w.r.t. serialization time and size of serialized data.
-		receiverProxy.tell(new BytesMessage<>(message, sender, receiver), this.self());
+
+		System.out.println("I get here");
+		// serialize message
+		KryoPool kryo = KryoPoolSingleton.get();
+		byte[] serializedMessage = kryo.toBytesWithClass(message);
+
+		// convert from byte[] to Byte[]
+		Byte[] serializedMessageToSend = new Byte[serializedMessage.length];
+		int i = 0;
+		for(byte b: serializedMessage)
+			serializedMessageToSend[i++] = b;
+
+		System.out.println("serialized and in Byte[]");
+
+		// make iterable for source
+		List<Byte> list = Arrays.asList(serializedMessageToSend);
+
+		// put into source
+		Source<Byte, NotUsed> messagePartsSource = Source.from(list);
+
+		// stream source
+		SourceRef<Byte> sourceRef;
+		sourceRef = messagePartsSource.runWith(StreamRefs.sourceRef(), this.context().system());
+		System.out.println("Stream ready");
+
+		// tell receiver to stream source
+		// why can this not be inferred??
+		receiverProxy.tell(new BytesMessage(sourceRef, sender, receiver), this.self());
 	}
 
-	private void handle(BytesMessage<?> message) {
-		// TODO: With option a): Store the message, ask for the next chunk and, if all chunks are present, reassemble the message's content, deserialize it and pass it to the receiver.
-		// The following code assumes that the transmitted bytes are the original message, which they shouldn't be in your proper implementation ;-)
-		message.getReceiver().tell(message.getBytes(), message.getSender());
+	private void handle(BytesMessage message) {
+		try {
+			System.out.println("will try to stream");
+
+			// get source from from sourceRef
+			Source<Byte, NotUsed> source = message.getSourceRef().getSource();
+
+			// https://doc.akka.io/docs/akka/current/stream/operators/Sink/seq.html
+			// initialize sink with sinkseq to to receive Stream
+			CompletionStage<List<Byte>> result = source.runWith(Sink.seq(), this.context().system());
+
+			// process complete message
+			result.thenAccept(list ->
+					receiveCompleteMessage(list, message.getReceiver(), message.getSender()));
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.out.println("throwing an error!");
+		}
+	}
+
+	private void receiveCompleteMessage(List<Byte> receivedMessage, ActorRef receiver, ActorRef sender) {
+
+		System.out.println(receivedMessage);
+
+		// back from Byte[] to byte []
+		byte[] bytes = new byte[receivedMessage.toArray().length];
+		int i = 0;
+		for (Byte b : receivedMessage)
+			bytes[i++] = Byte.valueOf(b);
+
+		// deserialize message
+		KryoPool kryo = KryoPoolSingleton.get();
+		Object message = kryo.fromBytes(bytes);
+		System.out.println("here is your message:");
+		System.out.println(message);
+
+
+		// finally tell receiver about message
+		receiver.tell(message, sender);
 	}
 }
