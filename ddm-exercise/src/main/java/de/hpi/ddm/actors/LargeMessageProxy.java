@@ -1,8 +1,7 @@
 package de.hpi.ddm.actors;
 
 import java.io.Serializable;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletionStage;
 
 import akka.NotUsed;
@@ -14,11 +13,13 @@ import akka.stream.SourceRef;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.StreamRefs;
+import akka.util.ByteString;
 import com.twitter.chill.KryoPool;
 import de.hpi.ddm.singletons.KryoPoolSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import scala.collection.SeqLike;
 
 public class LargeMessageProxy extends AbstractLoggingActor {
 
@@ -27,6 +28,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	////////////////////////
 
 	public static final String DEFAULT_NAME = "largeMessageProxy";
+	private static final int CHUNK_SIZE = 1024; // 1kB;
 	
 	public static Props props() {
 		return Props.create(LargeMessageProxy.class);
@@ -47,7 +49,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage<T> implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		// to tell receiver where to look for stream
-		private SourceRef<Byte[]> sourceRef;
+		private SourceRef<ByteString> sourceRef;
 		private ActorRef sender;
 		private ActorRef receiver;
 	}
@@ -84,34 +86,17 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		KryoPool kryo = KryoPoolSingleton.get();
 		byte[] serializedMessage = kryo.toBytesWithClass(message);
 
-		// convert from byte[] to Byte[]
-		Byte[] serializedByteMessage = new Byte[serializedMessage.length];
-		int i = 0;
-		for(byte b: serializedMessage)
-			serializedByteMessage[i++] = b; // autoboxing
-
-		System.out.println("serialized and in Byte[]");
-
-		Byte[][] serializedMessageToSend = new Byte[(serializedMessage.length + 1024 - 1) / 1024][33];
-		int rest = serializedMessage.length % 1024;
-		int j = 0;
-		for (int chunk = 0; chunk < serializedMessageToSend.length -1; chunk++) {
-			for (int byteindex = 0; byteindex < 1024; byteindex++) {
-				serializedMessageToSend[chunk][byteindex] = serializedMessage[j++];
-			}
-		}
-		for (i = 0; j < serializedMessage.length; j++) {
-			serializedMessageToSend[serializedMessageToSend.length -1][i++] = serializedMessage[j++];
+		// chunk message
+		List<ByteString> messageChunks = new ArrayList<>();
+		for (int start = 0; start < serializedMessage.length; start += CHUNK_SIZE) {
+			messageChunks.add(ByteString.fromArray(serializedMessage, start, CHUNK_SIZE));
 		}
 
-		// make iterable for source
-		List<Byte[]> list = Arrays.asList(serializedMessageToSend);
-
-		// put into source
-		Source<Byte[], NotUsed> messagePartsSource = Source.from(list);
+		// create source of stream
+		Source<ByteString, NotUsed> messagePartsSource = Source.from(messageChunks);
 
 		// stream source
-		SourceRef<Byte[]> sourceRef;
+		SourceRef<ByteString> sourceRef;
 		sourceRef = messagePartsSource.runWith(StreamRefs.sourceRef(), this.context().system());
 		System.out.println("Stream ready");
 
@@ -119,16 +104,16 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		receiverProxy.tell(new BytesMessage<>(sourceRef, sender, receiver), this.self());
 	}
 
-	private void handle(BytesMessage message) {
+	private void handle(BytesMessage<?> message) {
 		try {
 			System.out.println("will try to stream");
 
 			// get source from from sourceRef
-			Source<Byte, NotUsed> source = message.getSourceRef().getSource();
+			Source<ByteString, NotUsed> source = message.getSourceRef().getSource();
 
 			// https://doc.akka.io/docs/akka/current/stream/operators/Sink/seq.html
 			// initialize sink with sinkseq to to receive Stream
-			CompletionStage<List<Byte>> result = source.runWith(Sink.seq(), this.context().system());
+			CompletionStage<List<ByteString>> result = source.runWith(Sink.seq(), this.context().system());
 
 			// process complete message
 			result.thenAccept(list ->
@@ -139,15 +124,18 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		}
 	}
 
-	private void receiveCompleteMessage(List<Byte> receivedMessage, ActorRef receiver, ActorRef sender) {
+	private void receiveCompleteMessage(List<ByteString> receivedMessage, ActorRef receiver, ActorRef sender) {
 
 		System.out.println(receivedMessage);
 
-		// back from Byte[] to byte []
-		byte[] bytes = new byte[receivedMessage.toArray().length];
-		int i = 0;
-		for (Byte b : receivedMessage)
-			bytes[i++] = Byte.valueOf(b);
+		// length of bytes is the sum over the lengths of the chunks
+		byte[] bytes = new byte[receivedMessage.stream().map(SeqLike::length).mapToInt(Integer::intValue).sum()];
+		// convert List<BysteString> to byte[]
+		int position = 0;
+		for (ByteString byteString : receivedMessage) {
+			System.arraycopy(byteString.toArray(), 0, bytes, position, byteString.length());
+			position += CHUNK_SIZE;
+		}
 
 		// deserialize message
 		KryoPool kryo = KryoPoolSingleton.get();
