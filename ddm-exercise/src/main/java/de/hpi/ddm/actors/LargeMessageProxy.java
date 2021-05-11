@@ -47,7 +47,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage<T> implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		// to tell receiver where to look for stream
-		private SourceRef<Byte> sourceRef;
+		private SourceRef<Byte[]> sourceRef;
 		private ActorRef sender;
 		private ActorRef receiver;
 	}
@@ -80,27 +80,38 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		ActorRef receiver = largeMessage.getReceiver();
 		ActorSelection receiverProxy = this.context().actorSelection(receiver.path().child(DEFAULT_NAME));
 
-		System.out.println("I get here");
 		// serialize message
 		KryoPool kryo = KryoPoolSingleton.get();
 		byte[] serializedMessage = kryo.toBytesWithClass(message);
 
 		// convert from byte[] to Byte[]
-		Byte[] serializedMessageToSend = new Byte[serializedMessage.length];
+		Byte[] serializedByteMessage = new Byte[serializedMessage.length];
 		int i = 0;
 		for(byte b: serializedMessage)
-			serializedMessageToSend[i++] = b;
+			serializedByteMessage[i++] = b; // autoboxing
 
 		System.out.println("serialized and in Byte[]");
 
+		Byte[][] serializedMessageToSend = new Byte[(serializedMessage.length + 1024 - 1) / 1024][33];
+		int rest = serializedMessage.length % 1024;
+		int j = 0;
+		for (int chunk = 0; chunk < serializedMessageToSend.length -1; chunk++) {
+			for (int byteindex = 0; byteindex < 1024; byteindex++) {
+				serializedMessageToSend[chunk][byteindex] = serializedMessage[j++];
+			}
+		}
+		for (i = 0; j < serializedMessage.length; j++) {
+			serializedMessageToSend[serializedMessageToSend.length -1][i++] = serializedMessage[j++];
+		}
+
 		// make iterable for source
-		List<Byte> list = Arrays.asList(serializedMessageToSend);
+		List<Byte[]> list = Arrays.asList(serializedMessageToSend);
 
 		// put into source
-		Source<Byte, NotUsed> messagePartsSource = Source.from(list);
+		Source<Byte[], NotUsed> messagePartsSource = Source.from(list);
 
 		// stream source
-		SourceRef<Byte> sourceRef;
+		SourceRef<Byte[]> sourceRef;
 		sourceRef = messagePartsSource.runWith(StreamRefs.sourceRef(), this.context().system());
 		System.out.println("Stream ready");
 
@@ -140,6 +151,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		// deserialize message
 		KryoPool kryo = KryoPoolSingleton.get();
+		// TODO: serialize/deserialize without class because class exists in both actors
 		Object message = kryo.fromBytes(bytes);
 		System.out.println("here is your message:");
 		System.out.println(message);
