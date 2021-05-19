@@ -31,8 +31,10 @@ public class Master extends AbstractLoggingActor {
 		this.reader = reader;
 		this.collector = collector;
 		this.workers = new ArrayList<>();
+		this.freeWorkers = new ArrayList<>();
 		this.largeMessageProxy = this.context().actorOf(LargeMessageProxy.props(), LargeMessageProxy.DEFAULT_NAME);
 		this.welcomeData = welcomeData;
+		this.linesToProcess = new ArrayList<>();
 	}
 
 	////////////////////
@@ -54,7 +56,12 @@ public class Master extends AbstractLoggingActor {
 	public static class RegistrationMessage implements Serializable {
 		private static final long serialVersionUID = 3303081601659723997L;
 	}
-	
+// new class for receiving the result from the worker
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class ResultMessage implements Serializable {
+		private static final long serialVersionUID = 8343040942748609598L;
+		private String result;
+	}
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -64,6 +71,10 @@ public class Master extends AbstractLoggingActor {
 	private final List<ActorRef> workers;
 	private final ActorRef largeMessageProxy;
 	private final BloomFilter welcomeData;
+
+	// 2 queues: one for lines in the csv to process, one of workers to give these lines to:
+	private final List<ActorRef> freeWorkers;
+	private final List<String[]> linesToProcess;
 
 	private long startTime;
 	
@@ -87,6 +98,7 @@ public class Master extends AbstractLoggingActor {
 				.match(BatchMessage.class, this::handle)
 				.match(Terminated.class, this::handle)
 				.match(RegistrationMessage.class, this::handle)
+				.match(ResultMessage.class, this::handle)
 				// TODO: Add further messages here to share work between Master and Worker actors
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
@@ -97,7 +109,16 @@ public class Master extends AbstractLoggingActor {
 		
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 	}
-	
+
+	protected void handle(ResultMessage message) {
+		String result = message.getResult();
+		// TODO: Send (partial) results to the Collector
+		// new Todo: parse String not String[] / have actual result
+		this.collector.tell(new Collector.CollectMessage(result), this.self());
+		ActorRef worker = this.sender();
+		this.freeWorkers.add(worker);
+	}
+
 	protected void handle(BatchMessage message) {
 		
 		// TODO: This is where the task begins:
@@ -115,21 +136,28 @@ public class Master extends AbstractLoggingActor {
 		// - It is your choice, how and if you want to make use of the batched inputs. Simply aggregate all batches in the Master and start the processing afterwards, if you wish.
 
 		// TODO: Stop fetching lines from the Reader once an empty BatchMessage was received; we have seen all data then
+		// thought: new todo, probably we want to double check, whether the processing is done, before we
+		// terminate, so a boolean for that might be nice
 		if (message.getLines().isEmpty()) {
 			this.terminate();
 			return;
 		}
-		
-		// TODO: Process the lines with the help of the worker actors
-		for (String[] line : message.getLines())
-			this.log().error("Need help processing: {}", Arrays.toString(line));
-		
-		// TODO: Send (partial) results to the Collector
-		this.collector.tell(new Collector.CollectMessage("If I had results, this would be one."), this.self());
-		
+		// if message is not empty, add the lines to our linesToProcess:
+		this.linesToProcess.addAll(message.getLines());
+
+		// while there are free workers and work, give workers work:
+
+		while (!this.freeWorkers.isEmpty() && !this.linesToProcess.isEmpty()) {
+			// get a free worker
+			ActorRef worker = this.freeWorkers.remove(0);
+			// get the work for the free worker
+			String[] lineToProcess = this.linesToProcess.remove(0);
+			worker.tell(new Worker.WorkMessage(lineToProcess, this.self()), this.self());
+		}
+
 		// TODO: Fetch further lines from the Reader
+		// good :)
 		this.reader.tell(new Reader.ReadMessage(), this.self());
-		
 	}
 	
 	protected void terminate() {
@@ -152,11 +180,13 @@ public class Master extends AbstractLoggingActor {
 	protected void handle(RegistrationMessage message) {
 		this.context().watch(this.sender());
 		this.workers.add(this.sender());
+		this.freeWorkers.add(this.sender());
 		this.log().info("Registered {}", this.sender());
 		
-		this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
-		
+		// this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
+		// what do we need this largeMessageProxy for here?
 		// TODO: Assign some work to registering workers. Note that the processing of the global task might have already started.
+		// Done by adding new worker to free workers.
 	}
 	
 	protected void handle(Terminated message) {

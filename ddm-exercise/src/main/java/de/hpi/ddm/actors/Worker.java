@@ -48,7 +48,13 @@ public class Worker extends AbstractLoggingActor {
 		private static final long serialVersionUID = 8343040942748609598L;
 		private BloomFilter welcomeData;
 	}
-	
+	// line to process arrives through Workmessage
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class WorkMessage implements Serializable {
+		private static final long serialVersionUID = 8777040942748609598L;
+		private String[] lineToProcess;
+		private ActorRef master;
+	}
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -85,9 +91,21 @@ public class Worker extends AbstractLoggingActor {
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
 				.match(WelcomeMessage.class, this::handle)
+				.match(WorkMessage.class, this::handle)
 				// TODO: Add further messages here to share work between Master and Worker actors
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
+	}
+
+	private void handle(WorkMessage message) {
+		String[] lineToProcess = message.getLineToProcess();
+
+		// new TODO: do actual worker work
+
+		// then: give Master result ( for now, just the first index of original lineToProcess)
+		String result = lineToProcess[0];
+		ActorRef master = this.sender();
+		master.tell(new Master.ResultMessage(result), this.self());
 	}
 
 	private void handle(CurrentClusterState message) {
