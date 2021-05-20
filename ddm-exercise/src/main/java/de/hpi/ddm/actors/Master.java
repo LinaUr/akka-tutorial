@@ -29,9 +29,9 @@ public class Master extends AbstractLoggingActor {
         this.reader = reader;
         this.collector = collector;
         this.workers = new ArrayList<>();
-        this.freeWorkers = new ArrayList<>();
-        this.hintsToCrack = new ArrayList<>();
-        this.passwordsToCrack = new ArrayList<>();
+        this.freeWorkers = new LinkedList<>();
+        this.hintsToCrack = new LinkedList<>();
+        this.passwordsToCrack = new LinkedList<>();
         this.passwordPossibilities = new ArrayList<>();
         this.initialized = false;
     }
@@ -102,10 +102,10 @@ public class Master extends AbstractLoggingActor {
     private final List<ActorRef> workers;
 
     // 2 queues: one for lines in the csv to process, one of workers to give these lines to:
-    private final List<ActorRef> freeWorkers;
-    private final List<HintInformation> hintsToCrack;
+    private final LinkedList<ActorRef> freeWorkers;
+    private final LinkedList<HintInformation> hintsToCrack;
     // one more queue: for passwords to crack
-    private final List<PasswordInformation> passwordsToCrack;
+    private final LinkedList<PasswordInformation> passwordsToCrack;
 
     private Boolean initialized; // false until first message from reader received to set the following:
     private char[] password; // the "char universe" stays the same
@@ -225,11 +225,11 @@ public class Master extends AbstractLoggingActor {
             }
         }
         // if message is not empty, get records and convert each to Hint and put it in hintsToProcess
-        List<String[]> recordsToProcess = new ArrayList<>(message.getLines());
+        LinkedList<String[]> recordsToProcess = new LinkedList<>(message.getLines());
 
         while (!recordsToProcess.isEmpty()) {
             HintInformation hint = new HintInformation();
-            String[] recordToProcess = recordsToProcess.remove(0);
+            String[] recordToProcess = recordsToProcess.removeFirst();
             hint.setHashedHints(Arrays.copyOfRange(recordToProcess, 5, recordToProcess.length));
             //copies the hints, for example from 1582824a01c4b84...to 4b47ac115f6a91120d...in line 1
             hint.setHashedPassword(recordToProcess[4]);
@@ -251,12 +251,12 @@ public class Master extends AbstractLoggingActor {
 
         while (!this.freeWorkers.isEmpty()) {
             // get a free worker
-            ActorRef worker = this.freeWorkers.remove(0); // todo does this always work or could it be a nullpointer? or do we need something
-            // tell the worker to go to work // todo like a stack where we can always remove the first thing? i've used this pattern several times
-            if (!hintsToCrack.isEmpty()) { // todo maybe using a linkedlist for all those instances is a solution? linkedlists have "removeFirst()"
-                worker.tell(new Worker.WorkOnHintMessage(this.passwordPossibilities, hintsToCrack.remove(0)), this.self());
+            ActorRef worker = this.freeWorkers.removeFirst();
+            // tell the worker to go to work
+            if (!hintsToCrack.isEmpty()) {
+                worker.tell(new Worker.WorkOnHintMessage(this.passwordPossibilities, hintsToCrack.removeFirst()), this.self());
             } else if (!passwordsToCrack.isEmpty()) {
-                worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.remove(0), this.passwordLength), this.self());
+                worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
             }
         }
     }
