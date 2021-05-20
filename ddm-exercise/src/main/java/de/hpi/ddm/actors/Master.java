@@ -58,7 +58,7 @@ public class Master extends AbstractLoggingActor {
         private static final long serialVersionUID = 3303081601659723997L;
     }
 
-    // new class for receiving the result from the worker
+    // new class for receiving the result from the worker after working on hintcracking
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -68,14 +68,14 @@ public class Master extends AbstractLoggingActor {
         private String hashedPassword;
     }
 
-    // new class for receiving the result from the worker
+    // new class for receiving the result from the worker after working on passwordcracking
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class PasswordResultMessage implements Serializable {
-        private static final long serialVersionUID = 393040944448609598L;
+        private static final long serialVersionUID = 393040944448111598L;
         private String plainPassword;
-        private String hashedPassword;
+        private String hashedPassword; // i am sending this hashedPassword, but I don't think we need it. All the collector actor does is printing the "result" anyway
     }
 
     @Data
@@ -85,7 +85,7 @@ public class Master extends AbstractLoggingActor {
         String[] hashedHints;
         String hashedPassword;
     }
-
+// created HintInformation and PasswordInformation to better structure the data, it felt like it got out of hand :D
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -101,13 +101,14 @@ public class Master extends AbstractLoggingActor {
     private final ActorRef collector;
     private final List<ActorRef> workers;
 
-    // 2 queues: one for lines in the csv to process, one of workers to give these lines to:
+    // 3 queues: one of workers to give these lines to:
     private final LinkedList<ActorRef> freeWorkers;
+    // one for hints to crack,
     private final LinkedList<HintInformation> hintsToCrack;
-    // one more queue: for passwords to crack
+    // one for passwords to crack
     private final LinkedList<PasswordInformation> passwordsToCrack;
 
-    private Boolean initialized; // false until first message from reader received to set the following:
+    private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
     private char[] password; // the "char universe" stays the same
     private int passwordLength; // also stays the same
     private final List<char[]> passwordPossibilities;
@@ -164,7 +165,7 @@ public class Master extends AbstractLoggingActor {
         PasswordInformation pI = new PasswordInformation(passwordCharacters, message.getHashedPassword());
         passwordsToCrack.add(pI);
 
-        // now, the worker is free again.
+        // as the worker is done with cracking the password, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
         dispatchFreeWorkers();
@@ -175,7 +176,7 @@ public class Master extends AbstractLoggingActor {
         // this is a todo from thorsten, i feel like this oneliner gets the job done.. or does it? :D
         this.collector.tell(new Collector.CollectMessage(message.getPlainPassword()), this.self());
 
-
+        // as the worker is done with cracking the password, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
         dispatchFreeWorkers();
@@ -197,10 +198,12 @@ public class Master extends AbstractLoggingActor {
         // - It is your choice, how and if you want to make use of the batched inputs. Simply aggregate all batches in the Master and start the processing afterwards, if you wish.
 
         // TODO: Stop fetching lines from the Reader once an empty BatchMessage was received; we have seen all data then
+
         // thought: new todo, probably we want to double check, whether the processing is done, before we
-        // terminate, so a boolean for that might be nice
+        // todo terminate, so a boolean for that might be nice? or an enum that works
+        //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
         if (message.getLines().isEmpty()) {
-            this.terminate();
+            this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
             return;
         }
 
@@ -209,8 +212,12 @@ public class Master extends AbstractLoggingActor {
             this.initialized = true;
             this.password = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
-            // once, generate a list of strings, each with the password chars minus one
-            // this is useful to let different workers work on solving different hints
+
+            // each hint is a hashed permutation of all password characters but one. So it proves useful to
+            // once, generate a list of all password characters minus one.
+            // todo: this might useful to let different workers work on solving different hints
+            // right now, one worker just solves one hint at a time and gets all the permutations so he doesnt have
+            // to calculate them himself
             for (char charToLeave : this.password) {
                 char[] passwordChars = new char[this.password.length - 1];
                 int j = 0;
@@ -224,7 +231,9 @@ public class Master extends AbstractLoggingActor {
                 //looks like this: BCDEFGHIJK,ACDEFGHIJK,ABDEFGHIJK,ABCEFGHIJK,ABCDFGHIJK,..
             }
         }
-        // if message is not empty, get records and convert each to Hint and put it in hintsToProcess
+
+        // message is not empty, so let's get all the records and convert each to
+        // HintInformation and put it in hintsToCrack
         LinkedList<String[]> recordsToProcess = new LinkedList<>(message.getLines());
 
         while (!recordsToProcess.isEmpty()) {
@@ -241,7 +250,7 @@ public class Master extends AbstractLoggingActor {
         dispatchFreeWorkers();
 
         // TODO: Fetch further lines from the Reader
-        // also a todo from thorsten, for now the oneliner he provided looks good to me :). might not be enough though
+        // a todo from thorsten, for now the oneliner he provided looks good to me :). might not be enough though
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
 

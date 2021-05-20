@@ -121,7 +121,7 @@ public class Worker extends AbstractLoggingActor {
         List<String> hashedHints = Arrays.asList(message.getHint().getHashedHints());
         List<char[]> characterPossibilities = message.getCharacterPossibilities();
         List<Integer> indexesOfCharacters = new ArrayList<>();
-        // new TODO: do actual worker work
+
         // for each characterpossibility, get all permutations.
         // for each of these permutations, hash them
         // for each hashed permutation, check if they match any of the hashedHints
