@@ -205,7 +205,7 @@ public class Master extends AbstractLoggingActor {
         }
 
         // if first BatchMessage, set what stays the same:
-        if (this.initialized == false) {
+        if (!this.initialized) {
             this.initialized = true;
             this.password = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
