@@ -173,7 +173,7 @@ public class Master extends AbstractLoggingActor {
         // todo terminate, so a boolean for that might be nice? or an enum that works
         //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
         if (message.getLines().isEmpty()) {
-            this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
+            // this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
             return;
         }
 
@@ -236,6 +236,7 @@ public class Master extends AbstractLoggingActor {
             passwordCharacters.remove(this.password[i]);
         }
         System.out.println(passwordCharacters);
+        // TODO when the program runs, it always prints [J, K], so there must be an error somewhere
         // todo these two loops AND the set does not look like the most efficient solution
 
         // with the passwordCharacters cracked, a new
@@ -268,8 +269,7 @@ public class Master extends AbstractLoggingActor {
         System.out.println("Dobby is a free worker!");
         System.out.println(freeWorkers.isEmpty());
 
-        while (!this.freeWorkers.isEmpty()) {
-
+        if (!this.freeWorkers.isEmpty()) {
             // tell a worker to go to work
             if (!hintsToCrack.isEmpty()) {
                 // get a free worker
@@ -281,7 +281,6 @@ public class Master extends AbstractLoggingActor {
                 ActorRef worker = this.freeWorkers.removeFirst();
                 worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
                 System.out.println("Dobby is working on Passwords");
-
             }
         }
     }
