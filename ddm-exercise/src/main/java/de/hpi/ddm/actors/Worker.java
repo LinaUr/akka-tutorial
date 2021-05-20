@@ -152,6 +152,9 @@ public class Worker extends AbstractLoggingActor {
         Set<Character> passwordCharacters = message.getPasswordInformation().getPasswordCharacters();
         int passwordLength = message.getPasswordLength();
 
+        // to show that this is actually executed and the passwordCharacter are calculated nicely:
+        System.out.println(passwordCharacters);
+
         // find permutation
 
         // check permutation like this: this.hash(permuation).equals(hashedPassword);

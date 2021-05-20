@@ -30,10 +30,12 @@ public class Master extends AbstractLoggingActor {
         this.collector = collector;
         this.workers = new ArrayList<>();
         this.freeWorkers = new LinkedList<>();
+        this.largeMessageProxy = this.context().actorOf(LargeMessageProxy.props(), LargeMessageProxy.DEFAULT_NAME);
         this.hintsToCrack = new LinkedList<>();
         this.passwordsToCrack = new LinkedList<>();
         this.passwordPossibilities = new ArrayList<>();
         this.initialized = false;
+        this.welcomeData = welcomeData;
     }
 
     ////////////////////
@@ -100,6 +102,9 @@ public class Master extends AbstractLoggingActor {
     private final ActorRef reader;
     private final ActorRef collector;
     private final List<ActorRef> workers;
+    private final ActorRef largeMessageProxy;
+    private final BloomFilter welcomeData;
+
 
     // 3 queues: one of workers to give these lines to:
     private final LinkedList<ActorRef> freeWorkers;
@@ -146,43 +151,8 @@ public class Master extends AbstractLoggingActor {
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
 
-    protected void handle(HintResultMessage message) {
-        List<Integer> result = message.getResult();
-
-        // result tells us which characters are _not_ in the string, so we know which are:
-        Set<Character> passwordCharacters = new HashSet<Character>();
-        for (char ch : this.password) {
-            passwordCharacters.add(ch);
-        }
-        for (int i : result) {
-            passwordCharacters.remove(this.password[i]);
-        }
-        System.out.println(passwordCharacters);
-        // todo these two loops AND the set does not look like the most efficient solution
-
-        // with the passwordCharacters cracked, a new
-        // queue for passwordCracking work is necessary
-        PasswordInformation pI = new PasswordInformation(passwordCharacters, message.getHashedPassword());
-        passwordsToCrack.add(pI);
-
-        // as the worker is done with cracking the password, he can get new work assigned
-        ActorRef worker = this.sender();
-        this.freeWorkers.add(worker);
-        dispatchFreeWorkers();
-    }
-
-    protected void handle(PasswordResultMessage message) {
-        // TODO: Send (partial) results to the Collector
-        // this is a todo from thorsten, i feel like this oneliner gets the job done.. or does it? :D
-        this.collector.tell(new Collector.CollectMessage(message.getPlainPassword()), this.self());
-
-        // as the worker is done with cracking the password, he can get new work assigned
-        ActorRef worker = this.sender();
-        this.freeWorkers.add(worker);
-        dispatchFreeWorkers();
-    }
-
     protected void handle(BatchMessage message) {
+        System.out.println("received batch");
         // TODO: This is where the task begins:
         // - The Master received the first batch of input records.
         // - To receive the next batch, we need to send another ReadMessage to the reader.
@@ -242,7 +212,7 @@ public class Master extends AbstractLoggingActor {
             hint.setHashedHints(Arrays.copyOfRange(recordToProcess, 5, recordToProcess.length));
             //copies the hints, for example from 1582824a01c4b84...to 4b47ac115f6a91120d...in line 1
             hint.setHashedPassword(recordToProcess[4]);
-
+            System.out.println("lets add a hint");
             hintsToCrack.add(hint);
         }
 
@@ -254,18 +224,64 @@ public class Master extends AbstractLoggingActor {
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
 
+    protected void handle(HintResultMessage message) {
+        List<Integer> result = message.getResult();
+
+        // result tells us which characters are _not_ in the string, so we know which are:
+        Set<Character> passwordCharacters = new HashSet<Character>();
+        for (char ch : this.password) {
+            passwordCharacters.add(ch);
+        }
+        for (int i : result) {
+            passwordCharacters.remove(this.password[i]);
+        }
+        System.out.println(passwordCharacters);
+        // todo these two loops AND the set does not look like the most efficient solution
+
+        // with the passwordCharacters cracked, a new
+        // queue for passwordCracking work is necessary
+        PasswordInformation pI = new PasswordInformation(passwordCharacters, message.getHashedPassword());
+        passwordsToCrack.add(pI);
+        System.out.println("lets add a password");
+
+
+        // as the worker is done with cracking the password, he can get new work assigned
+        ActorRef worker = this.sender();
+        this.freeWorkers.add(worker);
+        dispatchFreeWorkers();
+    }
+
+    protected void handle(PasswordResultMessage message) {
+        // TODO: Send (partial) results to the Collector
+        // this is a todo from thorsten, i feel like this oneliner gets the job done.. or does it? :D
+        this.collector.tell(new Collector.CollectMessage(message.getPlainPassword()), this.self());
+
+        // as the worker is done with cracking the password, he can get new work assigned
+        ActorRef worker = this.sender();
+        this.freeWorkers.add(worker);
+        dispatchFreeWorkers();
+    }
+
     protected void dispatchFreeWorkers() {
         // I noticed that basically everytime we receive a message, we would like a worker to go work on something
         // todo I am not sure if this approach works 100% of the time? might need improvement
+        System.out.println("Dobby is a free worker!");
+        System.out.println(freeWorkers.isEmpty());
 
         while (!this.freeWorkers.isEmpty()) {
-            // get a free worker
-            ActorRef worker = this.freeWorkers.removeFirst();
-            // tell the worker to go to work
+
+            // tell a worker to go to work
             if (!hintsToCrack.isEmpty()) {
+                // get a free worker
+                ActorRef worker = this.freeWorkers.removeFirst();
                 worker.tell(new Worker.WorkOnHintMessage(this.passwordPossibilities, hintsToCrack.removeFirst()), this.self());
+                System.out.println("Dobby is working on Hints");
             } else if (!passwordsToCrack.isEmpty()) {
+                // get a free worker
+                ActorRef worker = this.freeWorkers.removeFirst();
                 worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
+                System.out.println("Dobby is working on Passwords");
+
             }
         }
     }
@@ -292,6 +308,8 @@ public class Master extends AbstractLoggingActor {
         this.workers.add(this.sender());
         this.freeWorkers.add(this.sender());
         this.log().info("Registered {}", this.sender());
+
+        this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
 
         dispatchFreeWorkers();
     }
