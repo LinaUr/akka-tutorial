@@ -14,6 +14,7 @@ import de.hpi.ddm.structures.BloomFilter;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import scala.Int;
 
 public class Master extends AbstractLoggingActor {
 
@@ -35,6 +36,8 @@ public class Master extends AbstractLoggingActor {
 		this.largeMessageProxy = this.context().actorOf(LargeMessageProxy.props(), LargeMessageProxy.DEFAULT_NAME);
 		this.welcomeData = welcomeData;
 		this.linesToProcess = new ArrayList<>();
+		this.passwordPossibilities = new ArrayList<>();
+		this.initialized = false;
 	}
 
 	////////////////////
@@ -58,9 +61,9 @@ public class Master extends AbstractLoggingActor {
 	}
 // new class for receiving the result from the worker
 	@Data @NoArgsConstructor @AllArgsConstructor
-	public static class ResultMessage implements Serializable {
-		private static final long serialVersionUID = 8343040942748609598L;
-		private String result;
+	public static class HintResultMessage implements Serializable {
+		private static final long serialVersionUID = 393040942748609598L;
+		private List<Integer> result;
 	}
 	/////////////////
 	// Actor State //
@@ -75,6 +78,11 @@ public class Master extends AbstractLoggingActor {
 	// 2 queues: one for lines in the csv to process, one of workers to give these lines to:
 	private final List<ActorRef> freeWorkers;
 	private final List<String[]> linesToProcess;
+
+	private Boolean initialized; // false until first message from reader received to set the following:
+	private char[] password; // the "char universe" stays the same
+	private int lengthOfPassword; // also stays the same
+	private List<char[]> passwordPossibilities;
 
 	private long startTime;
 	
@@ -98,7 +106,7 @@ public class Master extends AbstractLoggingActor {
 				.match(BatchMessage.class, this::handle)
 				.match(Terminated.class, this::handle)
 				.match(RegistrationMessage.class, this::handle)
-				.match(ResultMessage.class, this::handle)
+				.match(HintResultMessage.class, this::handle)
 				// TODO: Add further messages here to share work between Master and Worker actors
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
@@ -110,11 +118,11 @@ public class Master extends AbstractLoggingActor {
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 	}
 
-	protected void handle(ResultMessage message) {
-		String result = message.getResult();
+	protected void handle(HintResultMessage message) {
+		List<Integer> result = message.getResult();
 		// TODO: Send (partial) results to the Collector
 		// new Todo: parse String not String[] / have actual result
-		this.collector.tell(new Collector.CollectMessage(result), this.self());
+		this.collector.tell(new Collector.CollectMessage("result"), this.self());
 		ActorRef worker = this.sender();
 		this.freeWorkers.add(worker);
 	}
@@ -142,6 +150,32 @@ public class Master extends AbstractLoggingActor {
 			this.terminate();
 			return;
 		}
+
+		// if first message, set what stays the same:
+		if(this.initialized == false) {
+			this.initialized = true;
+			this.password = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
+			this.lengthOfPassword = Integer.parseInt(message.getLines().get(0)[3]); // 10
+			// once, generate a list of strings, each with the password chars minus one
+			// this is useful to let different workers work on solving different hints
+			for(int i=0; i<this.password.length; i++) {
+				char charToLeave = this.password[i];
+				char passwordChars[] = new char[this.password.length-1];
+				int j = 0;
+				for(int k=0; k<this.password.length; k++) {
+					char charToAdd = this.password[k];
+					if(charToLeave == charToAdd) {
+						continue;
+					}
+					passwordChars[j++] = charToAdd;
+				}
+				this.passwordPossibilities.add(passwordChars);
+			}
+			/*for(char[] pp : passwordPossibilities) { // BCDEFGHIJK,ACDEFGHIJK,ABDEFGHIJK,ABCEFGHIJK,ABCDFGHIJK,..
+				System.out.print(pp);
+				System.out.print(",");
+			}*/
+		}
 		// if message is not empty, add the lines to our linesToProcess:
 		this.linesToProcess.addAll(message.getLines());
 
@@ -152,7 +186,10 @@ public class Master extends AbstractLoggingActor {
 			ActorRef worker = this.freeWorkers.remove(0);
 			// get the work for the free worker
 			String[] lineToProcess = this.linesToProcess.remove(0);
-			worker.tell(new Worker.WorkMessage(lineToProcess, this.self()), this.self());
+			String[] hashedHints = Arrays.copyOfRange(lineToProcess, 5, lineToProcess.length);
+			//copies the hints, for example from 1582824a01c4b84...to 4b47ac115f6a91120d...in line 1
+
+			worker.tell(new Worker.WorkOnHintMessage(this.passwordPossibilities, hashedHints), this.self());
 		}
 
 		// TODO: Fetch further lines from the Reader

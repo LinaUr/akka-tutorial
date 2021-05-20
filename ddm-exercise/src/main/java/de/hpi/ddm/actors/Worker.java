@@ -4,6 +4,8 @@ import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import akka.actor.AbstractLoggingActor;
@@ -48,12 +50,13 @@ public class Worker extends AbstractLoggingActor {
 		private static final long serialVersionUID = 8343040942748609598L;
 		private BloomFilter welcomeData;
 	}
-	// line to process arrives through Workmessage
+
+	// line to process arrives through WorkOnHintmessage
 	@Data @NoArgsConstructor @AllArgsConstructor
-	public static class WorkMessage implements Serializable {
+	public static class WorkOnHintMessage implements Serializable {
 		private static final long serialVersionUID = 8777040942748609598L;
-		private String[] lineToProcess;
-		private ActorRef master;
+		private List<char[]> characterPossibilities;
+		private String[] hashedHints;
 	}
 	/////////////////
 	// Actor State //
@@ -91,21 +94,40 @@ public class Worker extends AbstractLoggingActor {
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
 				.match(WelcomeMessage.class, this::handle)
-				.match(WorkMessage.class, this::handle)
+				.match(WorkOnHintMessage.class, this::handle)
 				// TODO: Add further messages here to share work between Master and Worker actors
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
 
-	private void handle(WorkMessage message) {
-		String[] lineToProcess = message.getLineToProcess();
-
+	private void handle(WorkOnHintMessage message) {
+		List<String> hashedHints = Arrays.asList(message.getHashedHints());
+		List<char[]> characterPossibilities = message.getCharacterPossibilities();
+		List<Integer> indexesOfCharacters = new ArrayList<>();
 		// new TODO: do actual worker work
-
-		// then: give Master result ( for now, just the first index of original lineToProcess)
-		String result = lineToProcess[0];
+		// for each characterpossibility, get all permutations.
+		// for each of these permutations, hash them
+		// for each hashed permutation, check if they match any of the hashedHints
+		// if it matches, store characterpossibility or char that it does NOT have and return it as a result to the master
+		// for that, we can store just the index as that index of the original password is a char we can lookup in the Master
+		int index = 0;
+		for(char[] possibility : characterPossibilities) {
+			List<String> permutations = new ArrayList<String>();
+			heapPermutation(possibility, possibility.length, possibility.length, permutations);
+			for(String permutation : permutations) {
+				String hashedP = this.hash(permutation);
+				if(hashedHints.contains(hashedP)) {
+					indexesOfCharacters.add(index);
+					index++;
+					break;
+				}
+			}
+		}
+		System.out.println(indexesOfCharacters);
+		// then: give Master result
+		List<Integer> result = indexesOfCharacters; // [0, 1, 2, 3, 4, 5, 6, 7, 8]
 		ActorRef master = this.sender();
-		master.tell(new Master.ResultMessage(result), this.self());
+		master.tell(new Master.HintResultMessage(result), this.self());
 	}
 
 	private void handle(CurrentClusterState message) {
