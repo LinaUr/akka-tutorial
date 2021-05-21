@@ -1,9 +1,5 @@
 package de.hpi.ddm.actors;
 
-import java.io.Serializable;
-import java.util.*;
-import java.util.concurrent.CompletionStage;
-
 import akka.NotUsed;
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -19,7 +15,11 @@ import de.hpi.ddm.singletons.KryoPoolSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import scala.collection.SeqLike;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletionStage;
 
 public class LargeMessageProxy extends AbstractLoggingActor {
 
@@ -76,6 +76,8 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	}
 
 	private void handle(LargeMessage<?> largeMessage) {
+		this.log().info("about to send message: \"{}\"", largeMessage.getMessage().toString());
+
 		// boilerplate by Thorsten that looks good
 		Object message = largeMessage.getMessage();
 		ActorRef sender = this.sender();
@@ -98,7 +100,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// stream source
 		SourceRef<ByteString> sourceRef;
 		sourceRef = messagePartsSource.runWith(StreamRefs.sourceRef(), this.context().system());
-		System.out.println("Stream ready");
+		this.log().info("Stream is ready.");
 
 		// tell receiver to stream source
 		receiverProxy.tell(new BytesMessage<>(sourceRef, sender, receiver), this.self());
@@ -106,7 +108,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 	private void handle(BytesMessage<?> message) {
 		try {
-			System.out.println("will try to stream");
+			this.log().info("Trying to stream from other end.");
 
 			// get source from from sourceRef
 			Source<ByteString, NotUsed> source = message.getSourceRef().getSource();
@@ -116,23 +118,22 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 			CompletionStage<List<ByteString>> result = source.runWith(Sink.seq(), this.context().system());
 
 			// process complete message
-			result.thenAccept(list ->
-					receiveCompleteMessage(list, message.getReceiver(), message.getSender()));
+			result.thenAccept(list -> receiveCompleteMessage(list, message.getReceiver(), message.getSender()));
 		} catch (Exception e) {
+			this.log().error("An Error occurred!");
 			e.printStackTrace();
-			System.out.println("throwing an error!");
 		}
 	}
 
-	private void receiveCompleteMessage(List<ByteString> receivedMessage, ActorRef receiver, ActorRef sender) {
+	private void receiveCompleteMessage(List<ByteString> receivedByteStrings, ActorRef receiver, ActorRef sender) {
 
-		System.out.println(receivedMessage);
+		this.log().info("Received number of ByteStrings: {}", receivedByteStrings.size());
 
 		// length of bytes is the sum over the lengths of the chunks
-		byte[] bytes = new byte[receivedMessage.stream().map(SeqLike::length).mapToInt(Integer::intValue).sum()];
+		byte[] bytes = new byte[receivedByteStrings.stream().map(msg -> msg.length()).mapToInt(Integer::intValue).sum()];
 		// convert List<BysteString> to byte[]
 		int position = 0;
-		for (ByteString byteString : receivedMessage) {
+		for (ByteString byteString : receivedByteStrings) {
 			System.arraycopy(byteString.toArray(), 0, bytes, position, byteString.length());
 			position += CHUNK_SIZE;
 		}
@@ -141,7 +142,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		KryoPool kryo = KryoPoolSingleton.get();
 		// TODO: serialize/deserialize without class because class exists in both actors
 		Object message = kryo.fromBytes(bytes);
-		System.out.println("here is your message:");
+		System.out.println("Here is the full received message:");
 		System.out.println(message);
 
 		// finally tell receiver about message
