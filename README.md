@@ -21,6 +21,6 @@ To make sure that the projects are set up correctly in an IDE, you can run the t
 ## Execution instructions
 
 The projects can be started by running their main classes, which are `de.hpi.akka_tutorial.Main`, `de.hpi.octopus.OctopusApp`, and `de.hpi.ddm.Main`, respectively, from within your IDE or from the command line. The app will then print an overview of the different possible parameters. Append parameters of your choice to the run a certain configuration. For example, calls could be as follows:
-* Parameters to start a master with two local workers: `master --workers 2`
-* Parameters to start a worker that tries to connect to a remote master: `worker --master <master host>:<master port>`
+* Parameters to start a master with two local workers: `master --workers 2` --> nope, its `master -w 2` or `master -numWorkers 2`
+* Parameters to start a worker that tries to connect to a remote master: `worker --master <master host>:<master port>` --> it's also `.. -m ..` or `.. -numMasters ..` instead.
 
