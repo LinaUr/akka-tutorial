@@ -118,7 +118,7 @@ public class Worker extends AbstractLoggingActor {
         List<String> hashedHints = Arrays.asList(message.getHint().getHashedHints());
         List<char[]> hintPossibilities = message.getHintPossibilities();
         List<Character> possibleChars = message.getPossibleChars(); // A to K ..used for checkup
-        ArrayList<Character> charsInPassword = new ArrayList<Character>(message.getPossibleChars()); // A to K
+        ArrayList<Character> charsInPassword = new ArrayList<>(message.getPossibleChars()); // A to K
 
 //        this.log().info("hintPossibilities legnth : possibileChars length {} : {}",hintPossibilities.size(), possibleChars.size() );
 //        this.log().info("char posiibilities:");
@@ -151,33 +151,19 @@ public class Worker extends AbstractLoggingActor {
     }
 
     private void handle(WorkOnPasswordMessage message) {
-        // todo one of the hardest parts i think, finding the permutation of known characters that is the password
-        //  while not knowing how often each character appears..
-        String hashedPassword = message.getPasswordInformation().getHashedPassword();
-        Set<Character> passwordCharacters = message.getPasswordInformation().getPasswordCharacters();
+        List<Character> charsInPassword = message.getPasswordData().getCharsInPassword();
         int passwordLength = message.getPasswordLength();
-        LinkedList<String> characterCombinations = new LinkedList<String>();
-        for(int i=1; i < passwordLength; i++) {
-            String characterCombination = "";
-            for(int j = 0; j < i; j++) {
-                characterCombination += passwordCharacters.toArray()[0];
-            }
-            for(int k = i; k<passwordLength; k++) {
-                characterCombination += passwordCharacters.toArray()[1];
-            }
-            System.out.println(characterCombination);
-            characterCombinations.add(characterCombination);
-        }
+        String hashedPassword = message.getPasswordData().getHashedPassword();
 
-        // to show that this is actually executed and the passwordCharacter are calculated nicely:
-        System.out.println(passwordCharacters);
+        StringBuilder crackedPassword = new StringBuilder (); // use StringBuilder to ensure pass by reference
 
-        // find permutation
-        // check permutation like this: this.hash(permuation).equals(hashedPassword);
+        // Generating all possible strings for password while checking against the hashed password along the process
+        CrackPassword(charsInPassword, "", charsInPassword.size(), passwordLength, hashedPassword, crackedPassword);
+        this.log().info("cracked password: " + crackedPassword);
 
-        // then send found password back to master
-        // ActorRef master = this.sender();
-        // master.tell(new Master.PasswordResultMessage(permutation, hashedPassword()), this.self());
+        // send found password back to master
+        ActorRef master = this.sender();
+        master.tell(new Master.PasswordResultMessage(crackedPassword.toString(), hashedPassword), this.self());
     }
 
     private void handle(CurrentClusterState message) {
@@ -263,6 +249,43 @@ public class Worker extends AbstractLoggingActor {
                 a[i] = a[size - 1];
                 a[size - 1] = temp;
             }
+        }
+    }
+
+    // Generating all possible strings of length k given n characters
+    // https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
+    void CrackPassword(List<Character> set, String combination, int n, int k, String originalHashedPassword, StringBuilder crackedPassword)
+    {
+        if (crackedPassword.length() != 0)
+            return; // password was already found then :D
+
+        // Base case: k is 0,
+        // print combination
+        if (k == 0)
+        {
+//            System.out.println("generated combination: " + combination);
+            String hashedGeneratedPassword = hash(combination);
+            if (hashedGeneratedPassword.equals(originalHashedPassword)){
+                crackedPassword.append(combination);
+//                this.log().info("Found password for ID  " + this.ID + ": " + this.crackedPassword);
+                this.log().info("Found password " + crackedPassword);
+            }
+            return;
+        }
+
+        // One by one add all characters
+        // from set and recursively
+        // call for k equals to k-1
+        for (int i = 0; i < n; ++i)
+        {
+
+            // Next character of input added
+            String newPrefix = combination + set.get(i);
+
+            // k is decreased, because
+            // we have added a new character
+            CrackPassword(set, newPrefix,
+                    n, k - 1, originalHashedPassword, crackedPassword);
         }
     }
 }
