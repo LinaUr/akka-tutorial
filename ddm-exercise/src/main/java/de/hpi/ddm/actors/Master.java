@@ -33,7 +33,7 @@ public class Master extends AbstractLoggingActor {
         this.largeMessageProxy = this.context().actorOf(LargeMessageProxy.props(), LargeMessageProxy.DEFAULT_NAME);
         this.hintsToCrack = new LinkedList<>();
         this.passwordsToCrack = new LinkedList<>();
-        this.passwordPossibilities = new ArrayList<>();
+        this.hintPossibilities = new ArrayList<>();
         this.initialized = false;
         this.welcomeData = welcomeData;
     }
@@ -116,7 +116,7 @@ public class Master extends AbstractLoggingActor {
     private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
     private char[] password; // the "char universe" stays the same
     private int passwordLength; // also stays the same
-    private final List<char[]> passwordPossibilities;
+    private final List<char[]> hintPossibilities;
 
     private long startTime;
 
@@ -197,7 +197,7 @@ public class Master extends AbstractLoggingActor {
                     }
                     passwordChars[j++] = charToAdd;
                 }
-                this.passwordPossibilities.add(passwordChars);
+                this.hintPossibilities.add(passwordChars);
                 //looks like this: BCDEFGHIJK,ACDEFGHIJK,ABDEFGHIJK,ABCEFGHIJK,ABCDFGHIJK,..
             }
         }
@@ -235,7 +235,6 @@ public class Master extends AbstractLoggingActor {
         for (int i : result) {
             passwordCharacters.remove(this.password[i]);
         }
-        System.out.println(passwordCharacters);
         // TODO when the program runs, it always prints [J, K], so there must be an error somewhere
         // todo these two loops AND the set does not look like the most efficient solution
 
@@ -245,8 +244,7 @@ public class Master extends AbstractLoggingActor {
         passwordsToCrack.add(pI);
         System.out.println("lets add a password");
 
-
-        // as the worker is done with cracking the password, he can get new work assigned
+        // as the worker is done with cracking the hint, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
         dispatchFreeWorkers();
@@ -267,14 +265,13 @@ public class Master extends AbstractLoggingActor {
         // I noticed that basically everytime we receive a message, we would like a worker to go work on something
         // todo I am not sure if this approach works 100% of the time? might need improvement
         System.out.println("Dobby is a free worker!");
-        System.out.println(freeWorkers.isEmpty());
 
         if (!this.freeWorkers.isEmpty()) {
             // tell a worker to go to work
             if (!hintsToCrack.isEmpty()) {
                 // get a free worker
                 ActorRef worker = this.freeWorkers.removeFirst();
-                worker.tell(new Worker.WorkOnHintMessage(this.passwordPossibilities, hintsToCrack.removeFirst()), this.self());
+                worker.tell(new Worker.WorkOnHintMessage(this.hintPossibilities, hintsToCrack.removeFirst()), this.self());
                 System.out.println("Dobby is working on Hints");
             } else if (!passwordsToCrack.isEmpty()) {
                 // get a free worker

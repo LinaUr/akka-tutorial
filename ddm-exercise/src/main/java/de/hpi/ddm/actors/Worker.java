@@ -4,10 +4,7 @@ import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -74,7 +71,6 @@ public class Worker extends AbstractLoggingActor {
         private int passwordLength;
     }
 
-
     /////////////////
     // Actor State //
     /////////////////
@@ -135,11 +131,12 @@ public class Worker extends AbstractLoggingActor {
                 String hashedP = this.hash(permutation);
                 if (hashedHints.contains(hashedP)) {
                     indexesOfCharacters.add(index);
-                    index++;
                     break;
                 }
             }
+            index++;
         }
+
         // then: give Master result
         ActorRef master = this.sender();
         master.tell(new Master.HintResultMessage(indexesOfCharacters, message.getHint().getHashedPassword()), this.self());
@@ -151,12 +148,23 @@ public class Worker extends AbstractLoggingActor {
         String hashedPassword = message.getPasswordInformation().getHashedPassword();
         Set<Character> passwordCharacters = message.getPasswordInformation().getPasswordCharacters();
         int passwordLength = message.getPasswordLength();
+        LinkedList<String> characterCombinations = new LinkedList<String>();
+        for(int i=1; i < passwordLength; i++) {
+            String characterCombination = "";
+            for(int j = 0; j < i; j++) {
+                characterCombination += passwordCharacters.toArray()[0];
+            }
+            for(int k = i; k<passwordLength; k++) {
+                characterCombination += passwordCharacters.toArray()[1];
+            }
+            System.out.println(characterCombination);
+            characterCombinations.add(characterCombination);
+        }
 
         // to show that this is actually executed and the passwordCharacter are calculated nicely:
         System.out.println(passwordCharacters);
 
         // find permutation
-
         // check permutation like this: this.hash(permuation).equals(hashedPassword);
 
         // then send found password back to master
