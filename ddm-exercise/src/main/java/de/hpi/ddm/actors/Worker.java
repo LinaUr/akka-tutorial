@@ -57,7 +57,8 @@ public class Worker extends AbstractLoggingActor {
     @AllArgsConstructor
     public static class WorkOnHintMessage implements Serializable {
         private static final long serialVersionUID = 8777040942748609598L;
-        private List<char[]> characterPossibilities;
+        private List<char[]> hintPossibilities;
+        private List<Character> possibleChars;
         private Master.HintInformation hint; // we do not need the hashed password it here directly, but when it is part of the message,
         // we can pass it on so we do not have to look it up again later
     }
@@ -67,7 +68,7 @@ public class Worker extends AbstractLoggingActor {
     @AllArgsConstructor
     public static class WorkOnPasswordMessage implements Serializable {
         private static final long serialVersionUID = 8777040942123409598L;
-        private Master.PasswordInformation passwordInformation;
+        private Master.PasswordData passwordData;
         private int passwordLength;
     }
 
@@ -115,31 +116,38 @@ public class Worker extends AbstractLoggingActor {
 
     private void handle(WorkOnHintMessage message) {
         List<String> hashedHints = Arrays.asList(message.getHint().getHashedHints());
-        List<char[]> characterPossibilities = message.getCharacterPossibilities();
-        List<Integer> indexesOfCharacters = new ArrayList<>();
+        List<char[]> hintPossibilities = message.getHintPossibilities();
+        List<Character> possibleChars = message.getPossibleChars(); // A to K ..used for checkup
+        ArrayList<Character> charsInPassword = new ArrayList<Character>(message.getPossibleChars()); // A to K
 
-        // for each characterpossibility, get all permutations.
-        // for each of these permutations, hash them
-        // for each hashed permutation, check if they match any of the hashedHints
-        // if it matches, store characterpossibility or char that it does NOT have and return it as a result to the master
-        // for that, we can store just the index as that index of the original password is a char we can lookup in the Master
-        int index = 0;
-        for (char[] possibility : characterPossibilities) {
-            List<String> permutations = new ArrayList<>();
-            heapPermutation(possibility, possibility.length, possibility.length, permutations);
-            for (String permutation : permutations) {
-                String hashedP = this.hash(permutation);
-                if (hashedHints.contains(hashedP)) {
-                    indexesOfCharacters.add(index);
-                    break;
-                }
+//        this.log().info("hintPossibilities legnth : possibileChars length {} : {}",hintPossibilities.size(), possibleChars.size() );
+//        this.log().info("char posiibilities:");
+//        hintPossibilities.forEach(charArr -> System.out.println(Arrays.toString(charArr)));
+
+        // We know that hintPossibilities.size() == possibileChars.size()
+        // So we iterate over all possible hints and permutate them while checking against the hashed hint along the process.
+        // In case we crack a hint, we remove the corresponding character as it won't be in the password then.
+        for (int i = 0; i < hintPossibilities.size(); i++){
+            System.out.println("checking possible hint " + i);
+            List<String> permutations = new ArrayList<>(); // we don't really need that
+            char[] possibleHint = hintPossibilities.get(i); // BCDEFGHIJK (missing A), ACDEFGHIJK (missing B), ...
+            StringBuilder crackedHint = new StringBuilder();
+            // permutate them while checking against the hashed hint along the process.
+            heapPermutation(possibleHint, possibleHint.length, possibleHint.length, permutations, hashedHints, crackedHint);
+            if (crackedHint.length() != 0) {
+                // we cracked a hint
+                charsInPassword.remove(possibleChars.get(i));
+                System.out.println(charsInPassword);
             }
-            index++;
         }
+
+//        charsInPassword = new ArrayList<Character>(); // testing reasons
+//        charsInPassword.add('F'); // testing reasons
+//        charsInPassword.add('G'); // testing reasons
 
         // then: give Master result
         ActorRef master = this.sender();
-        master.tell(new Master.HintResultMessage(indexesOfCharacters, message.getHint().getHashedPassword()), this.self());
+        master.tell(new Master.HintResultMessage(charsInPassword, message.getHint().getHashedPassword()), this.self());
     }
 
     private void handle(WorkOnPasswordMessage message) {
@@ -223,13 +231,24 @@ public class Worker extends AbstractLoggingActor {
     // Generating all permutations of an array using Heap's Algorithm
     // https://en.wikipedia.org/wiki/Heap's_algorithm
     // https://www.geeksforgeeks.org/heaps-algorithm-for-generating-permutations/
-    private void heapPermutation(char[] a, int size, int n, List<String> l) {
+//    private void heapPermutation(char[] a, int size, int n, List<String> l) {
+    private void heapPermutation(char[] a, int size, int n, List<String> l, List<String> hashedHints, StringBuilder crackedHint) {
+
+        if (crackedHint.length() != 0)
+            return; // hint was cracked then
+
         // If size is 1, store the obtained permutation
-        if (size == 1)
+        if (size == 1) {
             l.add(new String(a));
+            String permutationHash = hash(new String(a));
+            if (hashedHints.contains(permutationHash)) {
+                crackedHint.append(new String(a));
+                this.log().info("Hint cracked: {}", crackedHint);
+            }
+        }
 
         for (int i = 0; i < size; i++) {
-            heapPermutation(a, size - 1, n, l);
+            heapPermutation(a, size - 1, n, l, hashedHints, crackedHint);
 
             // If size is odd, swap first and last element
             if (size % 2 == 1) {

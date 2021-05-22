@@ -2,6 +2,7 @@ package de.hpi.ddm.actors;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -66,7 +67,7 @@ public class Master extends AbstractLoggingActor {
     @AllArgsConstructor
     public static class HintResultMessage implements Serializable {
         private static final long serialVersionUID = 393040942748609598L;
-        private List<Integer> result;
+        private List<Character> charsInPassword;
         private String hashedPassword;
     }
 
@@ -91,8 +92,8 @@ public class Master extends AbstractLoggingActor {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class PasswordInformation {
-        Set<Character> passwordCharacters;
+    public static class PasswordData {
+        List<Character> charsInPassword;
         String hashedPassword;
     }
     /////////////////
@@ -111,10 +112,10 @@ public class Master extends AbstractLoggingActor {
     // one for hints to crack,
     private final LinkedList<HintInformation> hintsToCrack;
     // one for passwords to crack
-    private final LinkedList<PasswordInformation> passwordsToCrack;
+    private final LinkedList<PasswordData> passwordsToCrack;
 
     private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
-    private char[] password; // the "char universe" stays the same
+    private char[] possibleChars; // the "char universe" stays the same
     private int passwordLength; // also stays the same
     private final List<char[]> hintPossibilities;
 
@@ -173,14 +174,14 @@ public class Master extends AbstractLoggingActor {
         // todo terminate, so a boolean for that might be nice? or an enum that works
         //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
         if (message.getLines().isEmpty()) {
-            // this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
+//             this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
             return;
         }
 
         // if first BatchMessage, set what stays the same:
         if (!this.initialized) {
             this.initialized = true;
-            this.password = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
+            this.possibleChars = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
 
             // each hint is a hashed permutation of all password characters but one. So it proves useful to
@@ -188,10 +189,10 @@ public class Master extends AbstractLoggingActor {
             // todo: this might useful to let different workers work on solving different hints
             // right now, one worker just solves one hint at a time and gets all the permutations so he doesnt have
             // to calculate them himself
-            for (char charToLeave : this.password) {
-                char[] passwordChars = new char[this.password.length - 1];
+            for (char charToLeave : this.possibleChars) {
+                char[] passwordChars = new char[this.possibleChars.length - 1];
                 int j = 0;
-                for (char charToAdd : this.password) {
+                for (char charToAdd : this.possibleChars) {
                     if (charToLeave == charToAdd) {
                         continue;
                     }
@@ -225,23 +226,9 @@ public class Master extends AbstractLoggingActor {
     }
 
     protected void handle(HintResultMessage message) {
-        List<Integer> result = message.getResult();
-
-        // result tells us which characters are _not_ in the string, so we know which are:
-        Set<Character> passwordCharacters = new HashSet<Character>();
-        for (char ch : this.password) {
-            passwordCharacters.add(ch);
-        }
-        for (int i : result) {
-            passwordCharacters.remove(this.password[i]);
-        }
-        // TODO when the program runs, it always prints [J, K], so there must be an error somewhere
-        // todo these two loops AND the set does not look like the most efficient solution
-
-        // with the passwordCharacters cracked, a new
-        // queue for passwordCracking work is necessary
-        PasswordInformation pI = new PasswordInformation(passwordCharacters, message.getHashedPassword());
-        passwordsToCrack.add(pI);
+        // add password to crack to its queue
+        PasswordData pwData = new PasswordData(message.getCharsInPassword(), message.getHashedPassword());
+        passwordsToCrack.add(pwData);
         System.out.println("lets add a password");
 
         // as the worker is done with cracking the hint, he can get new work assigned
@@ -268,12 +255,14 @@ public class Master extends AbstractLoggingActor {
 
         if (!this.freeWorkers.isEmpty()) {
             // tell a worker to go to work
-            if (!hintsToCrack.isEmpty()) {
+            if (!this.hintsToCrack.isEmpty()) {
                 // get a free worker
                 ActorRef worker = this.freeWorkers.removeFirst();
-                worker.tell(new Worker.WorkOnHintMessage(this.hintPossibilities, hintsToCrack.removeFirst()), this.self());
+                // new todo maybe revert type and use char[] here again. I think that would result in a smaller message
+                List<Character> possibleChars = new String(this.possibleChars).chars().mapToObj(c -> (char) c).collect(Collectors.toList());
+                worker.tell(new Worker.WorkOnHintMessage(this.hintPossibilities, possibleChars, hintsToCrack.removeFirst()), this.self());
                 System.out.println("Dobby is working on Hints");
-            } else if (!passwordsToCrack.isEmpty()) {
+            } else if (!this.passwordsToCrack.isEmpty()) {
                 // get a free worker
                 ActorRef worker = this.freeWorkers.removeFirst();
                 worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
