@@ -152,7 +152,7 @@ public class Worker extends AbstractLoggingActor {
         }
 
         pwData.setCharsInPassword(remainingChars);
-        pwData.setHashedHints(null); // to reduce message content //TODO: is that okay?
+        pwData.setHashedHints(null); // to reduce message content
 
         // then: give Master result
         ActorRef master = this.sender();

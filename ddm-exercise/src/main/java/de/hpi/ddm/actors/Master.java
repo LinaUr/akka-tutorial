@@ -36,6 +36,8 @@ public class Master extends AbstractLoggingActor {
         this.passwordsToCrack = new LinkedList<>();
         this.hintPossibilities = new ArrayList<>();
         this.initialized = false;
+        this.isAllRecordsReceived = false;
+        this.numberOfRecords = 0;
         this.welcomeData = welcomeData;
     }
 
@@ -105,6 +107,8 @@ public class Master extends AbstractLoggingActor {
     private final LinkedList<PasswordData> hintPackagesToCrack;
     private final LinkedList<PasswordData> passwordsToCrack;
 
+    private int numberOfRecords;
+    private Boolean isAllRecordsReceived;
     private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
     private char[] possibleChars; // the "char universe" stays the same
     private int passwordLength; // also stays the same
@@ -165,7 +169,7 @@ public class Master extends AbstractLoggingActor {
         // todo terminate, so a boolean for that might be nice? or an enum that works
         //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
         if (message.getLines().isEmpty()) {
-//             this.terminate(); // todo in any case, this.terminate at this point is way too drastic :D
+                this.isAllRecordsReceived = true;
             return;
         }
 
@@ -189,21 +193,23 @@ public class Master extends AbstractLoggingActor {
             pwData.setHashedHints(Arrays.copyOfRange(recordToProcess, 5, recordToProcess.length));
             pwData.setHashedPassword(recordToProcess[4]);
             System.out.println("lets add a hint");
+            this.numberOfRecords += 1;
             hintPackagesToCrack.add(pwData);
         }
 
         // while there are free workers and work, give workers work:
         dispatchFreeWorkers();
 
-        // TODO: Fetch further lines from the Reader
-        // a todo from thorsten, for now the oneliner he provided looks good to me :). might not be enough though
-        this.reader.tell(new Reader.ReadMessage(), this.self());
+        if(!this.isAllRecordsReceived) {
+            this.reader.tell(new Reader.ReadMessage(), this.self());
+        }
     }
 
     protected void handle(HintResultMessage message) {
         // add password to crack to its queue
         passwordsToCrack.add(message.getPasswordData());
         System.out.println("lets add a password");
+
 
         // as the worker is done with cracking the hint, he can get new work assigned
         ActorRef worker = this.sender();
@@ -212,10 +218,9 @@ public class Master extends AbstractLoggingActor {
     }
 
     protected void handle(PasswordResultMessage message) {
-        // TODO: Send (partial) results to the Collector
         this.log().info("Cracked Password for ID {}, {}: {}",  message.getPasswordData().getId(), message.getPasswordData().getName(), message.getPlainPassword());
         this.collector.tell(new Collector.CollectMessage("Cracked Password for ID "+message.getPasswordData().getId()+", "+message.getPasswordData().getName()+": "+message.getPlainPassword()), this.self());
-
+        this.numberOfRecords -=1;
         // as the worker is done with cracking the password, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
@@ -225,6 +230,10 @@ public class Master extends AbstractLoggingActor {
     protected void dispatchFreeWorkers() {
         // I noticed that basically everytime we receive a message, we would like a worker to go work on something
         System.out.println("Dobby is a free worker!");
+        if(this.isAllRecordsReceived && this.numberOfRecords == 0){
+            System.out.println("let's terminate");
+            this.terminate();
+        }
 
         while (!this.freeWorkers.isEmpty() && (!this.hintPackagesToCrack.isEmpty() || !this.passwordsToCrack.isEmpty())) {
             // tell a worker to go to work
@@ -245,6 +254,7 @@ public class Master extends AbstractLoggingActor {
     }
 
     protected void terminate() {
+        System.out.println("terminating");
         this.collector.tell(new Collector.PrintMessage(), this.self());
 
         this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
