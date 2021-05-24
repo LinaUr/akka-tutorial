@@ -253,7 +253,7 @@ public class Master extends AbstractLoggingActor {
         // todo I am not sure if this approach works 100% of the time? might need improvement
         System.out.println("Dobby is a free worker!");
 
-        if (!this.freeWorkers.isEmpty()) {
+        while (!this.freeWorkers.isEmpty() && (!this.hintsToCrack.isEmpty() || !this.passwordsToCrack.isEmpty())) {
             // tell a worker to go to work
             if (!this.hintsToCrack.isEmpty()) {
                 // get a free worker
