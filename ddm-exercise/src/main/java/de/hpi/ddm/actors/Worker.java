@@ -167,7 +167,7 @@ public class Worker extends AbstractLoggingActor {
         StringBuilder crackedPassword = new StringBuilder (); // use StringBuilder to ensure pass by reference
 
         // Generating all possible strings for password while checking against the hashed password along the process
-        CrackPassword(pwData.getCharsInPassword(), "", pwData.getCharsInPassword().size(), passwordLength, hashedPassword, crackedPassword);
+        crackPassword(pwData.getCharsInPassword(), "", pwData.getCharsInPassword().size(), passwordLength, hashedPassword, crackedPassword);
         this.log().info("cracked password: {}", crackedPassword);
 
         // send found password back to master
@@ -261,7 +261,7 @@ public class Worker extends AbstractLoggingActor {
 
     // Generating all possible strings of length k given n characters
     // https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
-    void CrackPassword(List<Character> set, String combination, int n, int k, String originalHashedPassword, StringBuilder crackedPassword)
+    private void crackPassword(List<Character> set, String combination, int n, int k, String originalHashedPassword, StringBuilder crackedPassword)
     {
         if (crackedPassword.length() != 0)
             return; // password was already found then :D
@@ -288,7 +288,7 @@ public class Worker extends AbstractLoggingActor {
 
             // k is decreased, because
             // we have added a new character
-            CrackPassword(set, newPrefix,
+            crackPassword(set, newPrefix,
                     n, k - 1, originalHashedPassword, crackedPassword);
         }
     }
