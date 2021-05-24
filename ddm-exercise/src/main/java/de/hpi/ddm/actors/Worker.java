@@ -117,9 +117,22 @@ public class Worker extends AbstractLoggingActor {
     private void handle(WorkOnHintMessage message) {
         Master.PasswordData pwData = message.getPasswordData();
         List<String> hashedHints = Arrays.asList(pwData.getHashedHints());
-        List<char[]> hintPossibilities = message.getHintPossibilities();
         List<Character> possibleChars = message.getPossibleChars(); // A to K ..used for checkup
         ArrayList<Character> remainingChars = new ArrayList<>(message.getPossibleChars()); // A to K
+
+        List<char[]> hintPossibilities = new ArrayList<>();
+
+        for (char charToLeave : possibleChars) {
+            char[] passwordChars = new char[possibleChars.size() - 1];
+            int j = 0;
+            for (char charToAdd : possibleChars) {
+                if (charToLeave == charToAdd) {
+                    continue;
+                }
+                passwordChars[j++] = charToAdd;
+            }
+            hintPossibilities.add(passwordChars); // looks like: BCDEFGHIJK (missing A), ACDEFGHIJK (missing B),...
+        }
 
 //        this.log().info("hintPossibilities legnth : possibileChars length {} : {}",hintPossibilities.size(), possibleChars.size() );
 
@@ -127,21 +140,16 @@ public class Worker extends AbstractLoggingActor {
         // So we iterate over all possible hints and permutate them while checking against the hashed hint along the process.
         // In case we crack a hint, we remove the corresponding character as it won't be in the password then.
         for (int i = 0; i < hintPossibilities.size(); i++){
-            List<String> permutations = new ArrayList<>(); // we don't really need that
             char[] possibleHint = hintPossibilities.get(i); // BCDEFGHIJK (missing A), ACDEFGHIJK (missing B), ...
-            StringBuilder crackedHint = new StringBuilder();
             // permutate them while checking against the hashed hint along the process.
-            this.heapPermutation(possibleHint, possibleHint.length, possibleHint.length, permutations, hashedHints, crackedHint);
-            if (crackedHint.length() != 0) {
+            String crackedHint = this.heapPermutation(possibleHint, possibleHint.length, hashedHints);
+            if (!crackedHint.isEmpty()) {
                 // yay, we cracked a hint :D
+
                 remainingChars.remove(possibleChars.get(i));
             }
             this.log().info("hint cracked: {}, remaining letters: {}", crackedHint, remainingChars);
         }
-
-//        charsInPassword = new ArrayList<Character>(); // testing reasons
-//        charsInPassword.add('F'); // testing reasons
-//        charsInPassword.add('G'); // testing reasons
 
         pwData.setCharsInPassword(remainingChars);
         pwData.setHashedHints(null); // to reduce message content //TODO: is that okay?
@@ -219,23 +227,20 @@ public class Worker extends AbstractLoggingActor {
     // https://en.wikipedia.org/wiki/Heap's_algorithm
     // https://www.geeksforgeeks.org/heaps-algorithm-for-generating-permutations/
 //    private void heapPermutation(char[] a, int size, int n, List<String> l) {
-    private void heapPermutation(char[] a, int size, int n, List<String> l, List<String> hashedHints, StringBuilder crackedHint) {
-
-        if (crackedHint.length() != 0)
-            return; // hint was cracked then
+    private String heapPermutation(char[] a, int size, List<String> hashedHints) {
 
         // If size is 1, store the obtained permutation
         if (size == 1) {
-            l.add(new String(a));
-            String permutationHash = hash(new String(a));
-            if (hashedHints.contains(permutationHash)) {
-                crackedHint.append(new String(a));
-                this.log().info("Hint cracked: {}", crackedHint);
+//            this.log().info("permutation: {}", new String(a));
+            if (hashedHints.contains(hash(new String(a)))) {
+                return new String(a);
             }
         }
 
         for (int i = 0; i < size; i++) {
-            heapPermutation(a, size - 1, n, l, hashedHints, crackedHint);
+            String perm = heapPermutation(a, size - 1, hashedHints);
+            if (!perm.isEmpty())
+                return perm;
 
             // If size is odd, swap first and last element
             if (size % 2 == 1) {
@@ -251,6 +256,7 @@ public class Worker extends AbstractLoggingActor {
                 a[size - 1] = temp;
             }
         }
+        return "";
     }
 
     // Generating all possible strings of length k given n characters
@@ -264,11 +270,9 @@ public class Worker extends AbstractLoggingActor {
         // print combination
         if (k == 0)
         {
-//            System.out.println("generated combination: " + combination);
             String hashedGeneratedPassword = hash(combination);
             if (hashedGeneratedPassword.equals(originalHashedPassword)){
                 crackedPassword.append(combination);
-                this.log().info("Found password " + crackedPassword);
             }
             return;
         }

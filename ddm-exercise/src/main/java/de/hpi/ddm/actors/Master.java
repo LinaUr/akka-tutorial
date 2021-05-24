@@ -61,7 +61,7 @@ public class Master extends AbstractLoggingActor {
         private static final long serialVersionUID = 3303081601659723997L;
     }
 
-    // supreme custom classes
+    // supreme custom classes below
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -174,23 +174,6 @@ public class Master extends AbstractLoggingActor {
             this.initialized = true;
             this.possibleChars = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
-
-            // each hint is a hashed permutation of all password characters but one. So it proves useful to
-            // once, generate a list of all password characters minus one.
-            // todo: this might useful to let different workers work on solving different hints
-            // right now, one worker just solves one hint at a time and gets all the permutations so he doesnt have
-            // to calculate them himself
-            for (char charToLeave : this.possibleChars) {
-                char[] passwordChars = new char[this.possibleChars.length - 1];
-                int j = 0;
-                for (char charToAdd : this.possibleChars) {
-                    if (charToLeave == charToAdd) {
-                        continue;
-                    }
-                    passwordChars[j++] = charToAdd;
-                }
-                this.hintPossibilities.add(passwordChars); // looks like: BCDEFGHIJK (missing A), ACDEFGHIJK (missing B),...
-            }
         }
 
         // message is not empty, so let's get all the records and convert each to
