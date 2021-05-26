@@ -56,7 +56,7 @@ public class Worker extends AbstractLoggingActor {
     @AllArgsConstructor
     public static class WorkOnHintMessage implements Serializable {
         private static final long serialVersionUID = 8777040942748609598L;
-        private char[] possibleChars;
+        private char[] alphabet;
         private Master.HintData hintData;
     }
 
@@ -112,19 +112,19 @@ public class Worker extends AbstractLoggingActor {
     }
 
     private void handle(WorkOnHintMessage message) {
-        char[] alphabet = message.possibleChars;
+        char[] alphabet = message.alphabet;
         Master.HintData hintData = message.hintData;
         List<String> hashedHints = Arrays.asList(hintData.hashedHints);
         int indexCharToCheck = hintData.indexCharToCheck;
 
-        char[] charsToPermute = new char[message.possibleChars.length - 1];
-        new StringBuilder(new String(message.possibleChars))
+        char[] charsToPermute = new char[message.alphabet.length - 1];
+        new StringBuilder(new String(message.alphabet))
                 .deleteCharAt(indexCharToCheck)
-                .getChars(0, message.possibleChars.length - 1, charsToPermute, 0);
+                .getChars(0, message.alphabet.length - 1, charsToPermute, 0);
 
         // permuting the char combination while checking against the hashed hints along the process
         String crackedHint = this.heapPermutation(charsToPermute, charsToPermute.length, hashedHints);
-        Character missingChar = crackedHint.isEmpty() ? null : new Character(alphabet[indexCharToCheck]);
+        Character missingChar = crackedHint.isEmpty() ? null : alphabet[indexCharToCheck];
         this.log().info("hint cracked: {}, remove char: {}", crackedHint, missingChar);
 
         ActorRef master = this.sender();

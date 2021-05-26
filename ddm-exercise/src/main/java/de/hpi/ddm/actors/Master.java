@@ -119,9 +119,9 @@ public class Master extends AbstractLoggingActor {
     private Map<Integer, PasswordData> idToPasswordDataMap;
     private int numberOfRecords;
     private Boolean isAllRecordsReceived;
-    private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
-    private char[] possibleChars; // the "char universe" stays the same
-    private int passwordLength; // also stays the same
+    private Boolean initialized;
+    private char[] alphabet; // stays the same for all records
+    private int passwordLength; // also stays the same for all records
 
     private long startTime;
 
@@ -185,7 +185,7 @@ public class Master extends AbstractLoggingActor {
         // if first BatchMessage, set what stays the same
         if (!this.initialized) {
             this.initialized = true;
-            this.possibleChars = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
+            this.alphabet = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
         }
 
@@ -201,11 +201,11 @@ public class Master extends AbstractLoggingActor {
             pwData.name = recordToProcess[1];
             pwData.hashedPassword = recordToProcess[4];
             pwData.numRemainingHintsToCrack = hashedHints.length;
-            pwData.charsInPassword = new String(this.possibleChars).chars().mapToObj(c -> (char) c).collect(Collectors.toList());
+            pwData.charsInPassword = new String(this.alphabet).chars().mapToObj(c -> (char) c).collect(Collectors.toList());
             this.idToPasswordDataMap.put(pwData.id, pwData);
 
             // create hint data and queue hints as often as there are chars in the alphabet
-            for (int i = 0; i < this.possibleChars.length; i++) {
+            for (int i = 0; i < this.alphabet.length; i++) {
                 HintData hintData = new HintData();
                 hintData.passwordId = Integer.parseInt(recordToProcess[0]);
                 hintData.hashedHints = hashedHints;
@@ -216,12 +216,8 @@ public class Master extends AbstractLoggingActor {
             this.numberOfRecords++;
         }
 
-        // while there are free workers and work, give workers work
         dispatchFreeWorkers();
-
-        if(!this.isAllRecordsReceived) {
-            this.reader.tell(new Reader.ReadMessage(), this.self());
-        }
+        this.reader.tell(new Reader.ReadMessage(), this.self());
     }
 
     protected void handle(HintResultMessage message) {
@@ -271,7 +267,7 @@ public class Master extends AbstractLoggingActor {
                 System.out.println("Dobby is working on Password");
             } else if (!this.hintsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
-                worker.tell(new Worker.WorkOnHintMessage(possibleChars, hintsToCrack.removeFirst()), this.self());
+                worker.tell(new Worker.WorkOnHintMessage(alphabet, hintsToCrack.removeFirst()), this.self());
                 System.out.println("Dobby is working on Hint");
             }
         }
@@ -302,8 +298,6 @@ public class Master extends AbstractLoggingActor {
         this.log().info("Registered {}", this.sender());
 
         this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
-
-        dispatchFreeWorkers();
     }
 
     protected void handle(Terminated message) {
