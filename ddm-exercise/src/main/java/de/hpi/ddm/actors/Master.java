@@ -32,12 +32,12 @@ public class Master extends AbstractLoggingActor {
         this.workers = new ArrayList<>();
         this.freeWorkers = new LinkedList<>();
         this.largeMessageProxy = this.context().actorOf(LargeMessageProxy.props(), LargeMessageProxy.DEFAULT_NAME);
-        this.hintPackagesToCrack = new LinkedList<>();
+        this.hintsToCrack = new LinkedList<>();
         this.passwordsToCrack = new LinkedList<>();
-        this.hintPossibilities = new ArrayList<>();
         this.initialized = false;
         this.isAllRecordsReceived = false;
         this.numberOfRecords = 0;
+        this.idToPasswordDataMap = new HashMap<>();
         this.welcomeData = welcomeData;
     }
 
@@ -69,7 +69,8 @@ public class Master extends AbstractLoggingActor {
     @AllArgsConstructor
     public static class HintResultMessage implements Serializable {
         private static final long serialVersionUID = 393040942748609598L;
-        private PasswordData passwordData;
+        private int passwordId;
+        private Character missingChar;
     }
 
     @Data
@@ -84,12 +85,21 @@ public class Master extends AbstractLoggingActor {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class HintData implements Serializable {
+        int passwordId;
+        String[] hashedHints;
+        int indexCharToCheck;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class PasswordData implements Serializable {
         int id;
         String name;
         List<Character> charsInPassword;
         String hashedPassword;
-        String[] hashedHints;
+        int numRemainingHintsToCrack;
     }
     /////////////////
     // Actor State //
@@ -101,18 +111,17 @@ public class Master extends AbstractLoggingActor {
     private final ActorRef largeMessageProxy;
     private final BloomFilter welcomeData;
 
-
     // supreme custom queues
     private final LinkedList<ActorRef> freeWorkers;
-    private final LinkedList<PasswordData> hintPackagesToCrack;
+    private final LinkedList<HintData> hintsToCrack;
     private final LinkedList<PasswordData> passwordsToCrack;
 
+    private Map<Integer, PasswordData> idToPasswordDataMap;
     private int numberOfRecords;
     private Boolean isAllRecordsReceived;
     private Boolean initialized; // false until first message from reader received to set the following 3 parameters once and for all:
     private char[] possibleChars; // the "char universe" stays the same
     private int passwordLength; // also stays the same
-    private final List<char[]> hintPossibilities;
 
     private long startTime;
 
@@ -169,35 +178,45 @@ public class Master extends AbstractLoggingActor {
         // todo terminate, so a boolean for that might be nice? or an enum that works
         //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
         if (message.getLines().isEmpty()) {
-                this.isAllRecordsReceived = true;
+            this.isAllRecordsReceived = true;
             return;
         }
 
-        // if first BatchMessage, set what stays the same:
+        // if first BatchMessage, set what stays the same
         if (!this.initialized) {
             this.initialized = true;
             this.possibleChars = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
         }
 
-        // message is not empty, so let's get all the records and convert each to
-        // HintInformation and put it in hintsToCrack
         LinkedList<String[]> recordsToProcess = new LinkedList<>(message.getLines());
 
         while (!recordsToProcess.isEmpty()) {
-            // grab relevant data from line and add to queue for hints to crack
-            PasswordData pwData = new PasswordData();
             String[] recordToProcess = recordsToProcess.removeFirst();
+            String[] hashedHints = Arrays.copyOfRange(recordToProcess, 5, recordToProcess.length);
+
+            // create password data and store in map for later look up
+            PasswordData pwData = new PasswordData();
             pwData.id = Integer.parseInt(recordToProcess[0]);
             pwData.name = recordToProcess[1];
-            pwData.setHashedHints(Arrays.copyOfRange(recordToProcess, 5, recordToProcess.length));
-            pwData.setHashedPassword(recordToProcess[4]);
-            System.out.println("lets add a hint");
-            this.numberOfRecords += 1;
-            hintPackagesToCrack.add(pwData);
+            pwData.hashedPassword = recordToProcess[4];
+            pwData.numRemainingHintsToCrack = hashedHints.length;
+            pwData.charsInPassword = new String(this.possibleChars).chars().mapToObj(c -> (char) c).collect(Collectors.toList());
+            this.idToPasswordDataMap.put(pwData.id, pwData);
+
+            // create hint data and queue hints as often as there are chars in the alphabet
+            for (int i = 0; i < this.possibleChars.length; i++) {
+                HintData hintData = new HintData();
+                hintData.passwordId = Integer.parseInt(recordToProcess[0]);
+                hintData.hashedHints = hashedHints;
+                hintData.indexCharToCheck = i;
+                this.hintsToCrack.add(hintData);
+            }
+
+            this.numberOfRecords++;
         }
 
-        // while there are free workers and work, give workers work:
+        // while there are free workers and work, give workers work
         dispatchFreeWorkers();
 
         if(!this.isAllRecordsReceived) {
@@ -206,12 +225,22 @@ public class Master extends AbstractLoggingActor {
     }
 
     protected void handle(HintResultMessage message) {
-        // add password to crack to its queue
-        passwordsToCrack.add(message.getPasswordData());
-        System.out.println("lets add a password");
+        Character crackedChar = message.missingChar;
+        PasswordData pwData = idToPasswordDataMap.get(message.passwordId);
+        if(crackedChar != null) {
+            pwData.charsInPassword.remove(crackedChar);
+            pwData.numRemainingHintsToCrack--;
+            idToPasswordDataMap.put(pwData.id, pwData);
+            this.log().info("remove char {} for password {}", crackedChar, pwData.id);
+        }
 
+        // if no more hints to crack for a password, password is ready to be cracked
+        if(pwData.numRemainingHintsToCrack == 0) {
+            passwordsToCrack.add(pwData);
+            this.log().info("add password to queue");
+        }
 
-        // as the worker is done with cracking the hint, he can get new work assigned
+        // worker is done with cracking the hint, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
         dispatchFreeWorkers();
@@ -220,7 +249,7 @@ public class Master extends AbstractLoggingActor {
     protected void handle(PasswordResultMessage message) {
         this.log().info("Cracked Password for ID {}, {}: {}",  message.getPasswordData().getId(), message.getPasswordData().getName(), message.getPlainPassword());
         this.collector.tell(new Collector.CollectMessage("Cracked Password for ID "+message.getPasswordData().getId()+", "+message.getPasswordData().getName()+": "+message.getPlainPassword()), this.self());
-        this.numberOfRecords -=1;
+        this.numberOfRecords--;
         // as the worker is done with cracking the password, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
@@ -228,27 +257,22 @@ public class Master extends AbstractLoggingActor {
     }
 
     protected void dispatchFreeWorkers() {
-        // I noticed that basically everytime we receive a message, we would like a worker to go work on something
         System.out.println("Dobby is a free worker!");
         if(this.isAllRecordsReceived && this.numberOfRecords == 0){
             System.out.println("let's terminate");
             this.terminate();
         }
 
-        while (!this.freeWorkers.isEmpty() && (!this.hintPackagesToCrack.isEmpty() || !this.passwordsToCrack.isEmpty())) {
-            // tell a worker to go to work
+        // as long as there are free workers, assign them available work
+        while (!this.freeWorkers.isEmpty() && (!this.hintsToCrack.isEmpty() || !this.passwordsToCrack.isEmpty())) {
             if (!this.passwordsToCrack.isEmpty()) {
-                // get a free worker
                 ActorRef worker = this.freeWorkers.removeFirst();
                 worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
-                System.out.println("Dobby is working on Passwords");
-            } else if (!this.hintPackagesToCrack.isEmpty()) {
-                // get a free worker
+                System.out.println("Dobby is working on Password");
+            } else if (!this.hintsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
-                // new todo maybe revert type and use char[] here again. I think that would result in a smaller message
-                List<Character> possibleChars = new String(this.possibleChars).chars().mapToObj(c -> (char) c).collect(Collectors.toList());
-                worker.tell(new Worker.WorkOnHintMessage(this.hintPossibilities, possibleChars, hintPackagesToCrack.removeFirst()), this.self());
-                System.out.println("Dobby is working on Hints");
+                worker.tell(new Worker.WorkOnHintMessage(possibleChars, hintsToCrack.removeFirst()), this.self());
+                System.out.println("Dobby is working on Hint");
             }
         }
     }

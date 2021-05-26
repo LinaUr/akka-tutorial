@@ -51,16 +51,13 @@ public class Worker extends AbstractLoggingActor {
         private BloomFilter welcomeData;
     }
 
-    // line to process arrives through WorkOnHintmessage
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class WorkOnHintMessage implements Serializable {
         private static final long serialVersionUID = 8777040942748609598L;
-        private List<char[]> hintPossibilities;
-        private List<Character> possibleChars;
-        private Master.PasswordData passwordData; // we do not need the hashed password it here directly, but when it is part of the message,
-        // we can pass it on so we do not have to look it up again later
+        private char[] possibleChars;
+        private Master.HintData hintData;
     }
 
     @Data
@@ -115,64 +112,36 @@ public class Worker extends AbstractLoggingActor {
     }
 
     private void handle(WorkOnHintMessage message) {
-        Master.PasswordData pwData = message.getPasswordData();
-        List<String> hashedHints = Arrays.asList(pwData.getHashedHints());
-        List<Character> possibleChars = message.getPossibleChars(); // A to K ..used for checkup
-        ArrayList<Character> remainingChars = new ArrayList<>(message.getPossibleChars()); // A to K
+        char[] alphabet = message.possibleChars;
+        Master.HintData hintData = message.hintData;
+        List<String> hashedHints = Arrays.asList(hintData.hashedHints);
+        int indexCharToCheck = hintData.indexCharToCheck;
 
-        List<char[]> hintPossibilities = new ArrayList<>();
+        char[] charsToPermute = new char[message.possibleChars.length - 1];
+        new StringBuilder(new String(message.possibleChars))
+                .deleteCharAt(indexCharToCheck)
+                .getChars(0, message.possibleChars.length - 1, charsToPermute, 0);
 
-        for (char charToLeave : possibleChars) {
-            char[] passwordChars = new char[possibleChars.size() - 1];
-            int j = 0;
-            for (char charToAdd : possibleChars) {
-                if (charToLeave == charToAdd) {
-                    continue;
-                }
-                passwordChars[j++] = charToAdd;
-            }
-            hintPossibilities.add(passwordChars); // looks like: BCDEFGHIJK (missing A), ACDEFGHIJK (missing B),...
-        }
+        // permuting the char combination while checking against the hashed hints along the process
+        String crackedHint = this.heapPermutation(charsToPermute, charsToPermute.length, hashedHints);
+        Character missingChar = crackedHint.isEmpty() ? null : new Character(alphabet[indexCharToCheck]);
+        this.log().info("hint cracked: {}, remove char: {}", crackedHint, missingChar);
 
-//        this.log().info("hintPossibilities legnth : possibileChars length {} : {}",hintPossibilities.size(), possibleChars.size() );
-
-        // We know that hintPossibilities.size() == possibileChars.size()
-        // So we iterate over all possible hints and permutate them while checking against the hashed hint along the process.
-        // In case we crack a hint, we remove the corresponding character as it won't be in the password then.
-        for (int i = 0; i < hintPossibilities.size(); i++){
-            char[] possibleHint = hintPossibilities.get(i); // BCDEFGHIJK (missing A), ACDEFGHIJK (missing B), ...
-            // permutate them while checking against the hashed hint along the process.
-            String crackedHint = this.heapPermutation(possibleHint, possibleHint.length, hashedHints);
-            if (!crackedHint.isEmpty()) {
-                // yay, we cracked a hint :D
-
-                remainingChars.remove(possibleChars.get(i));
-            }
-            this.log().info("hint cracked: {}, remaining letters: {}", crackedHint, remainingChars);
-        }
-
-        pwData.setCharsInPassword(remainingChars);
-        pwData.setHashedHints(null); // to reduce message content
-
-        // then: give Master result
         ActorRef master = this.sender();
-        master.tell(new Master.HintResultMessage(pwData), this.self());
+        master.tell(new Master.HintResultMessage(hintData.passwordId, missingChar), this.self());
     }
 
     private void handle(WorkOnPasswordMessage message) {
-        Master.PasswordData pwData = message.getPasswordData();
-        String hashedPassword = pwData.getHashedPassword();
-        int passwordLength = message.getPasswordLength();
+        Master.PasswordData pwData = message.passwordData;
 
-        StringBuilder crackedPassword = new StringBuilder (); // use StringBuilder to ensure pass by reference
+        // generating all possible strings for password while checking against the hashed password along the process
+        String plainPW = crackPassword(pwData.charsInPassword, "", pwData.charsInPassword.size(), message.passwordLength, pwData.hashedPassword);
+        if (plainPW.isEmpty()) {
+            plainPW = "An error must have been occurred along the process, couldn't crack the password.";
+        }
 
-        // Generating all possible strings for password while checking against the hashed password along the process
-        crackPassword(pwData.getCharsInPassword(), "", pwData.getCharsInPassword().size(), passwordLength, hashedPassword, crackedPassword);
-        this.log().info("cracked password: {}", crackedPassword);
-
-        // send found password back to master
         ActorRef master = this.sender();
-        master.tell(new Master.PasswordResultMessage(crackedPassword.toString(), pwData), this.self());
+        master.tell(new Master.PasswordResultMessage(plainPW, pwData), this.self());
     }
 
     private void handle(CurrentClusterState message) {
@@ -261,20 +230,17 @@ public class Worker extends AbstractLoggingActor {
 
     // Generating all possible strings of length k given n characters
     // https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
-    private void crackPassword(List<Character> set, String combination, int n, int k, String originalHashedPassword, StringBuilder crackedPassword)
+    private String crackPassword(List<Character> set, String combination, int n, int k, String originalHashedPassword)
     {
-        if (crackedPassword.length() != 0)
-            return; // password was already found then :D
-
         // Base case: k is 0,
         // print combination
         if (k == 0)
         {
             String hashedGeneratedPassword = hash(combination);
             if (hashedGeneratedPassword.equals(originalHashedPassword)){
-                crackedPassword.append(combination);
+                return combination;
             }
-            return;
+            return "";
         }
 
         // One by one add all characters
@@ -288,8 +254,10 @@ public class Worker extends AbstractLoggingActor {
 
             // k is decreased, because
             // we have added a new character
-            crackPassword(set, newPrefix,
-                    n, k - 1, originalHashedPassword, crackedPassword);
+            String combi = crackPassword(set, newPrefix, n, k - 1, originalHashedPassword);
+            if (!combi.isEmpty())
+                return combi; // we have cracked the password :D
         }
+        return "";
     }
 }
