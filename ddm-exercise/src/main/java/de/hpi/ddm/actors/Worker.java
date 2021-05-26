@@ -55,7 +55,7 @@ public class Worker extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class WorkOnHintMessage implements Serializable {
-        private static final long serialVersionUID = 8777040942748609598L;
+        private static final long serialVersionUID = 1522652675066025890L;
         private char[] alphabet;
         private Master.HintData hintData;
     }
@@ -64,7 +64,7 @@ public class Worker extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class WorkOnPasswordMessage implements Serializable {
-        private static final long serialVersionUID = 8777040942123409598L;
+        private static final long serialVersionUID = 4591909895490294199L;
         private Master.PasswordData passwordData;
         private int passwordLength;
     }

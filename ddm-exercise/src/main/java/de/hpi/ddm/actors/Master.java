@@ -68,7 +68,7 @@ public class Master extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class HintResultMessage implements Serializable {
-        private static final long serialVersionUID = 393040942748609598L;
+        private static final long serialVersionUID = 2814948894296811652L;
         private int passwordId;
         private Character missingChar;
     }
@@ -77,7 +77,7 @@ public class Master extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class PasswordResultMessage implements Serializable {
-        private static final long serialVersionUID = 393040944448111598L;
+        private static final long serialVersionUID = 1913964994920090028L;
         private String plainPassword;
         private PasswordData passwordData;
     }
@@ -86,6 +86,7 @@ public class Master extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class HintData implements Serializable {
+        private static final long serialVersionUID = -5962140501079745971L;
         int passwordId;
         String[] hashedHints;
         int indexCharToCheck;
@@ -95,6 +96,7 @@ public class Master extends AbstractLoggingActor {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class PasswordData implements Serializable {
+        private static final long serialVersionUID = 7173331670152558213L;
         int id;
         String name;
         List<Character> charsInPassword;
