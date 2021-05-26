@@ -76,7 +76,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	}
 
 	private void handle(LargeMessage<?> largeMessage) {
-		this.log().info("about to send message: \"{}\"", largeMessage.getMessage().toString());
+//		this.log().info("About to send message: \"{}\"", largeMessage.getMessage().toString());
 
 		// boilerplate by Thorsten that looks good
 		Object message = largeMessage.getMessage();
@@ -100,7 +100,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// stream source
 		SourceRef<ByteString> sourceRef;
 		sourceRef = messagePartsSource.runWith(StreamRefs.sourceRef(), this.context().system());
-		this.log().info("Stream is ready.");
+//		this.log().info("Stream is ready, sending SourceRef to now.");
 
 		// tell receiver to stream source
 		receiverProxy.tell(new BytesMessage<>(sourceRef, sender, receiver), this.self());
@@ -108,7 +108,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 	private void handle(BytesMessage<?> message) {
 		try {
-			this.log().info("Trying to stream from other end.");
+//			this.log().info("Receiver is trying to stream message.");
 
 			// get source from from sourceRef
 			Source<ByteString, NotUsed> source = message.getSourceRef().getSource();
@@ -127,7 +127,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 	private void receiveCompleteMessage(List<ByteString> receivedByteStrings, ActorRef receiver, ActorRef sender) {
 
-		this.log().info("Received number of ByteStrings: {}", receivedByteStrings.size());
+//		this.log().info("Received number of ByteStrings: {}", receivedByteStrings.size());
 
 		// length of bytes is the sum over the lengths of the chunks
 		byte[] bytes = new byte[receivedByteStrings.stream().map(msg -> msg.length()).mapToInt(Integer::intValue).sum()];
@@ -140,10 +140,9 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		// deserialize message
 		KryoPool kryo = KryoPoolSingleton.get();
-		// TODO: serialize/deserialize without class because class exists in both actors
 		Object message = kryo.fromBytes(bytes);
-		System.out.println("Here is the full received message:");
-		System.out.println(message);
+
+//		this.log().info("Received message: {}", message);
 
 		// finally tell receiver about message
 		receiver.tell(message, sender);

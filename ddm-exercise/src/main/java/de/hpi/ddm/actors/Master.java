@@ -174,11 +174,8 @@ public class Master extends AbstractLoggingActor {
         // b) Memory reduction: If the batches are processed sequentially, the memory consumption can be kept constant; if the entire input is read into main memory, the memory consumption scales at least linearly with the input size.
         // - It is your choice, how and if you want to make use of the batched inputs. Simply aggregate all batches in the Master and start the processing afterwards, if you wish.
 
-        // TODO: Stop fetching lines from the Reader once an empty BatchMessage was received; we have seen all data then
 
-        // thought: new todo, probably we want to double check, whether the processing is done, before we
-        // todo terminate, so a boolean for that might be nice? or an enum that works
-        //  like a switch: first, nothing. then: all records processed. then: all hints cracked. then: all passwords cracked
+        // stop fetching lines from the Reader once an empty BatchMessage was received; we have seen all data then
         if (message.getLines().isEmpty()) {
             this.isAllRecordsReceived = true;
             return;
@@ -187,7 +184,7 @@ public class Master extends AbstractLoggingActor {
         // if first BatchMessage, set what stays the same
         if (!this.initialized) {
             this.initialized = true;
-            this.alphabet = message.getLines().get(0)[2].toCharArray(); //ABCDEFGHIJK
+            this.alphabet = message.getLines().get(0)[2].toCharArray(); // ABCDEFGHIJK
             this.passwordLength = Integer.parseInt(message.getLines().get(0)[3]); // 10
         }
 
@@ -229,35 +226,36 @@ public class Master extends AbstractLoggingActor {
             pwData.charsInPassword.remove(crackedChar);
             pwData.numRemainingHintsToCrack--;
             idToPasswordDataMap.put(pwData.id, pwData);
-            this.log().info("remove char {} for password {}", crackedChar, pwData.id);
+//            this.log().info("hint cracked, removing char {} for password {}", crackedChar, pwData.id);
         }
 
         // if no more hints to crack for a password, password is ready to be cracked
         if(pwData.numRemainingHintsToCrack == 0) {
             passwordsToCrack.add(pwData);
-            this.log().info("add password to queue");
+//            this.log().info("add password to queue");
         }
 
         // worker is done with cracking the hint, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
+        this.log().info("Dobby {} is a free worker!", this.sender().path().name().substring(6));
         dispatchFreeWorkers();
     }
 
     protected void handle(PasswordResultMessage message) {
-        this.log().info("Cracked Password for ID {}, {}: {}",  message.getPasswordData().getId(), message.getPasswordData().getName(), message.getPlainPassword());
+//        this.log().info("Cracked Password for ID {}, {}: {}",  message.getPasswordData().getId(), message.getPasswordData().getName(), message.getPlainPassword());
         this.collector.tell(new Collector.CollectMessage("Cracked Password for ID "+message.getPasswordData().getId()+", "+message.getPasswordData().getName()+": "+message.getPlainPassword()), this.self());
         this.numberOfRecords--;
         // as the worker is done with cracking the password, he can get new work assigned
         ActorRef worker = this.sender();
         this.freeWorkers.add(worker);
+        this.log().info("Dobby {} is a free worker!", this.sender().path().name().substring(6));
         dispatchFreeWorkers();
     }
 
     protected void dispatchFreeWorkers() {
-        System.out.println("Dobby is a free worker!");
         if(this.isAllRecordsReceived && this.numberOfRecords == 0){
-            System.out.println("let's terminate");
+
             this.terminate();
         }
 
@@ -266,17 +264,16 @@ public class Master extends AbstractLoggingActor {
             if (!this.passwordsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
                 this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), worker), this.self());
-                System.out.println("Dobby is working on Password");
             } else if (!this.hintsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
                 this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WorkOnHintMessage(alphabet, hintsToCrack.removeFirst()), worker), this.self());
-                System.out.println("Dobby is working on Hint");
             }
         }
     }
 
     protected void terminate() {
-        System.out.println("terminating");
+//        System.out.println("terminating");
+        this.log().info("Terminating now...");
         this.collector.tell(new Collector.PrintMessage(), this.self());
 
         this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
@@ -297,7 +294,8 @@ public class Master extends AbstractLoggingActor {
         this.context().watch(this.sender());
         this.workers.add(this.sender());
         this.freeWorkers.add(this.sender());
-        this.log().info("Registered {}", this.sender());
+//        this.log().info("Registered {}", this.sender());
+        this.log().info("Registered Dobby {}, as a free worker ", this.sender().path().name().substring(6));
 
         this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
         dispatchFreeWorkers();

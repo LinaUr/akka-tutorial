@@ -117,6 +117,11 @@ public class Worker extends AbstractLoggingActor {
         List<String> hashedHints = Arrays.asList(hintData.hashedHints);
         int indexCharToCheck = hintData.indexCharToCheck;
 
+        this.log().info("Dobby {} tries cracking Hint for PW {}, letting away {}!",
+                this.self().path().name().substring(6),
+                hintData.passwordId,
+                alphabet[indexCharToCheck]);
+
         char[] charsToPermute = new char[message.alphabet.length - 1];
         new StringBuilder(new String(message.alphabet))
                 .deleteCharAt(indexCharToCheck)
@@ -125,7 +130,7 @@ public class Worker extends AbstractLoggingActor {
         // permuting the char combination while checking against the hashed hints along the process
         String crackedHint = this.heapPermutation(charsToPermute, charsToPermute.length, hashedHints);
         Character missingChar = crackedHint.isEmpty() ? null : alphabet[indexCharToCheck];
-        this.log().info("hint cracked: {}, remove char: {}", crackedHint, missingChar);
+//        this.log().info("hint cracked: {}, remove char: {}", crackedHint, missingChar);
 
         ActorRef master = this.sender();
         this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Master.HintResultMessage(hintData.passwordId, missingChar), master), this.self());
@@ -133,6 +138,8 @@ public class Worker extends AbstractLoggingActor {
 
     private void handle(WorkOnPasswordMessage message) {
         Master.PasswordData pwData = message.passwordData;
+
+        this.log().info("Dobby {} is cracking Password {}!", this.self().path().name().substring(6), pwData.id);
 
         // generating all possible strings for password while checking against the hashed password along the process
         String plainPW = crackPassword(pwData.charsInPassword, "", pwData.charsInPassword.size(), message.passwordLength, pwData.hashedPassword);
