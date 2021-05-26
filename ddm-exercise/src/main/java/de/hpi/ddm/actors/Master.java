@@ -265,11 +265,11 @@ public class Master extends AbstractLoggingActor {
         while (!this.freeWorkers.isEmpty() && (!this.hintsToCrack.isEmpty() || !this.passwordsToCrack.isEmpty())) {
             if (!this.passwordsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
-                worker.tell(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), this.self());
+                this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WorkOnPasswordMessage(passwordsToCrack.removeFirst(), this.passwordLength), worker), this.self());
                 System.out.println("Dobby is working on Password");
             } else if (!this.hintsToCrack.isEmpty()) {
                 ActorRef worker = this.freeWorkers.removeFirst();
-                worker.tell(new Worker.WorkOnHintMessage(alphabet, hintsToCrack.removeFirst()), this.self());
+                this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WorkOnHintMessage(alphabet, hintsToCrack.removeFirst()), worker), this.self());
                 System.out.println("Dobby is working on Hint");
             }
         }
@@ -300,6 +300,7 @@ public class Master extends AbstractLoggingActor {
         this.log().info("Registered {}", this.sender());
 
         this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Worker.WelcomeMessage(this.welcomeData), this.sender()), this.self());
+        dispatchFreeWorkers();
     }
 
     protected void handle(Terminated message) {

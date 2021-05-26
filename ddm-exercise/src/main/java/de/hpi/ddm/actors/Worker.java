@@ -128,7 +128,7 @@ public class Worker extends AbstractLoggingActor {
         this.log().info("hint cracked: {}, remove char: {}", crackedHint, missingChar);
 
         ActorRef master = this.sender();
-        master.tell(new Master.HintResultMessage(hintData.passwordId, missingChar), this.self());
+        this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Master.HintResultMessage(hintData.passwordId, missingChar), master), this.self());
     }
 
     private void handle(WorkOnPasswordMessage message) {
@@ -141,7 +141,7 @@ public class Worker extends AbstractLoggingActor {
         }
 
         ActorRef master = this.sender();
-        master.tell(new Master.PasswordResultMessage(plainPW, pwData), this.self());
+        this.largeMessageProxy.tell(new LargeMessageProxy.LargeMessage<>(new Master.PasswordResultMessage(plainPW, pwData), master), this.self());
     }
 
     private void handle(CurrentClusterState message) {
