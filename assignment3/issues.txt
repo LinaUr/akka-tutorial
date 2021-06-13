@@ -1,0 +1,8 @@
+We tried to configure the java serializer (and also the akka-stream-ref "akka.stream.serialization.StreamRefSerializer") for "Akka StreamRefsProtocol and our Message Classes.
+("akka.stream.impl.streamref.StreamRefsProtocol" = java )
+
+For some reason, the worker decides to still use the Kryo Serializer which results in a deserialization error in the master who receives the message. This is just a Warning and not an error still, the master cannot register the worker and it results in a Kryo Exception.
+
+The two important warning outputs have been screenshotted and are placed in the issues_images folder.
+
+Sadly, although we really tried hard, we have not found a solution and would appreciate help.
