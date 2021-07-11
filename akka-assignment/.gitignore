@@ -7,7 +7,7 @@
 .recommenders
 *.releaseBackup
 release.properties
-.idea
+../.idea
 /.idea
 *.iml
 *.class
